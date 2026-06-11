@@ -9,6 +9,7 @@
 
 (require 'cl-lib)
 (require 'seance-acp)
+(require 'seance-context)
 (require 'seance-diff)
 
 (defvar seance-chat-buffer-name "*seance*"
@@ -148,8 +149,8 @@
     (seance-chat--insert-output (format "[error] %s\n\n" err))))
 
 (defun seance-chat--prepare-prompt (text)
-  "Return TEXT as the prompt to send (context injection hook, Task 12)."
-  text)
+  "Wrap TEXT with the environment preamble on the session's first turn."
+  (seance-context-wrap seance-chat--session text))
 
 (defun seance-chat-newline ()
   "Insert a newline into the input field."

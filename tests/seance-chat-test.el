@@ -32,10 +32,16 @@
 (ert-deftest seance-chat-echo-turn-renders ()
   (seance-chat-test--with-buffer "echo"
     (seance-chat-test--send-and-finish "hallo")
-    (should (string-match-p "Du › hallo" (buffer-string)))
-    (should (string-match-p "echo: hallo" (buffer-string)))
+    (let ((text (buffer-string)))
+      (should (string-match-p "Du › hallo" text))
+      ;; first turn carries the environment preamble before the input
+      (should (string-match-p "echo: You are running" text))
+      (should (string-match-p "---\n\nhallo" text)))
     ;; input field is empty again and point can type there
-    (should (= (point-max) (marker-position seance-chat--prompt-marker)))))
+    (should (= (point-max) (marker-position seance-chat--prompt-marker)))
+    ;; second turn must NOT be re-wrapped: literal echo, no preamble
+    (seance-chat-test--send-and-finish "zweite")
+    (should (string-match-p "echo: zweite" (buffer-string)))))
 
 (ert-deftest seance-chat-transcript-is-read-only ()
   (seance-chat-test--with-buffer "echo"
