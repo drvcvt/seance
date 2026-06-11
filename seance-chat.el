@@ -113,7 +113,6 @@
       (seance-chat--set-input "")
       (push text seance-chat--history)
       (setq seance-chat--history-pos nil)
-      (setq seance-chat--block nil)
       (seance-chat--insert-output
        (concat (propertize (concat "Du › " text) 'face 'seance-user-face)
                "\n\n"))

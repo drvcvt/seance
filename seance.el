@@ -79,13 +79,16 @@ collects edits for later review."
   (when-let* ((buf (get-buffer seance-chat-buffer-name)))
     (with-current-buffer buf
       (when seance-chat--session
-        (seance-acp-disconnect seance-chat--session)))))
+        (seance-acp-disconnect seance-chat--session)
+        (when (eq seance-acp--session seance-chat--session)
+          (setq seance-acp--session nil))))))
 
 (defun seance-toggle-permission-mode ()
-  "Toggle the current session between gated and auto permission mode."
+  "Toggle the chat buffer's session between gated and auto permission mode."
   (interactive)
-  (require 'seance-acp)
-  (if-let* ((sess seance-acp--session))
+  (require 'seance-chat)
+  (if-let* ((buf (get-buffer seance-chat-buffer-name))
+            (sess (buffer-local-value 'seance-chat--session buf)))
       (progn
         (message "seance: permission mode is now %s"
                  (seance-acp-toggle-permission-mode sess))
