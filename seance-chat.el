@@ -258,17 +258,21 @@
          (inhibit-read-only t))
     (when entry  ; wipe the old region (markers + overlay)
       (delete-overlay (plist-get entry :detail-ov))
-      (delete-region (plist-get entry :start) (plist-get entry :end)))
+      (delete-region (plist-get entry :start) (plist-get entry :end))
+      (set-marker (plist-get entry :start) nil)
+      (set-marker (plist-get entry :end) nil))
     (save-excursion
       (goto-char seance-chat--output-marker)
       (let ((start (point-marker)))
         (set-marker-insertion-type start nil)
         (insert (propertize (concat header "\n")
-                            'seance-tool-id id 'read-only t 'rear-nonsticky t))
+                            'seance-tool-id id 'read-only t
+                            'front-sticky '(read-only) 'rear-nonsticky t))
         (let ((dstart (point)))
           (unless (string-empty-p detail)
             (insert (propertize (concat detail "\n")
-                                'seance-tool-id id 'read-only t 'rear-nonsticky t)))
+                                'seance-tool-id id 'read-only t
+                                'front-sticky '(read-only) 'rear-nonsticky t)))
           (let ((ov (make-overlay dstart (point)))
                 (end (point-marker)))
             (overlay-put ov 'invisible
@@ -304,12 +308,15 @@
                        "\n"))
          (inhibit-read-only t))
     (when seance-chat--plan-start
-      (delete-region seance-chat--plan-start seance-chat--plan-end))
+      (delete-region seance-chat--plan-start seance-chat--plan-end)
+      (set-marker seance-chat--plan-start nil)
+      (set-marker seance-chat--plan-end nil))
     (save-excursion
       (goto-char seance-chat--output-marker)
       (let ((start (point-marker)))
         (set-marker-insertion-type start nil)
-        (insert (propertize text 'read-only t 'rear-nonsticky t
+        (insert (propertize text 'read-only t
+                            'front-sticky '(read-only) 'rear-nonsticky t
                             'face 'seance-thought-face))
         (setq seance-chat--plan-start start
               seance-chat--plan-end (point-marker))))))
