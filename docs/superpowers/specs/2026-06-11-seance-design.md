@@ -117,6 +117,17 @@ at the end of the buffer (text-property based field boundary).
 - The header line shows session state (idle/thinking/streaming/error) and
   the current permission mode.
 
+### Binding help (discoverability)
+
+Every seance buffer (chat, review buffer, permission diff window) binds `?`
+to a `transient` menu (built into Emacs 28+) listing that buffer's bindings,
+grouped by topic (input, navigation, tool calls, session, review) with a
+short description per key. Entries are dispatchable: pressing the key inside
+the menu runs the command, so the cheatsheet doubles as a command palette.
+The header line hints at it (`? = help`). Keymaps and the transient are
+defined from one shared table per mode so the help can never drift out of
+sync with the actual bindings.
+
 ### `seance-review.el` — permissions and diffs
 
 Gated mode: each `session/request_permission` for a file edit opens a side
@@ -198,7 +209,7 @@ changes to seance can be loaded and tested immediately via `emacs_eval`.
 1. **Core + minimal chat** — spawn adapter, initialize, session/new,
    send prompt, stream plain text into the chat buffer.
 2. **Tool calls + gated review** — tool-call rendering, permission flow,
-   diff side window.
+   diff side window, `?` binding-help transients for all seance buffers.
 3. **Buffer-aware fs** — serve `fs/read_text_file` / `fs/write_text_file`.
 4. **Bridge + context** — MCP bridge script, `emacs_*` tools, preamble.
 5. **Auto mode + review buffer + polish** — edit log, session diff review,
