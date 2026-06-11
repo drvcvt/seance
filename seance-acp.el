@@ -44,6 +44,9 @@ session id, CWD the session's working directory.  STATUS is one of
 (defun seance-acp-connect (cwd &rest opts)
   "Spawn the adapter and open an ACP session rooted at CWD.
 OPTS: :on-update :on-status :on-ready (each optional)."
+  ;; Registers the permission handler; required lazily here because
+  ;; seance-review requires seance-acp (load cycle at top level).
+  (require 'seance-review)
   (let* ((sess (seance-acp-session--make
                 :cwd (expand-file-name cwd)
                 :on-update (plist-get opts :on-update)

@@ -1,0 +1,133 @@
+;;; seance-review.el --- permission gating and session review -*- lexical-binding: t; -*-
+
+;;; Commentary:
+;; Gated mode: every session/request_permission opens a diff side window
+;; (a=allow, d=deny, A=allow rest of session).  Auto mode: allow silently.
+;; The session review buffer itself arrives in a later task.
+
+;;; Code:
+
+(require 'seance-acp)
+(require 'seance-diff)
+(require 'seance-keys)
+(require 'diff-mode)
+
+(defvar seance-review-permission-buffer "*seance permission*"
+  "Name of the buffer showing pending permission requests.")
+
+(defvar-local seance-review--reply nil
+  "Pending REPLY closure for the displayed permission request.")
+(defvar-local seance-review--options nil
+  "Options vector of the displayed permission request.")
+(defvar-local seance-review--session nil
+  "Session the displayed permission request belongs to.")
+
+(defun seance-review--pick-option (options &rest kinds)
+  "Return the optionId of the first option in OPTIONS matching KINDS, in order.
+Falls back to the first option when no kind matches."
+  (catch 'found
+    (dolist (kind kinds)
+      (seq-doseq (opt options)
+        (when (equal (plist-get opt :kind) kind)
+          (throw 'found (plist-get opt :optionId)))))
+    (plist-get (aref options 0) :optionId)))
+
+(defun seance-review--outcome (option-id)
+  "Build a session/request_permission result selecting OPTION-ID."
+  `(:outcome (:outcome "selected" :optionId ,option-id)))
+
+(defun seance-review-handle-permission (sess params reply)
+  "ACP session/request_permission entry point.
+SESS is the session, PARAMS the request params, REPLY the async
+result continuation.  Auto mode allows immediately; gated mode
+shows the diff side window and waits for the user."
+  (if (eq (seance-acp-session-permission-mode sess) 'auto)
+      (funcall reply (seance-review--outcome
+                      (seance-review--pick-option
+                       (plist-get params :options)
+                       "allow_once" "allow_always")))
+    (seance-review--show-permission sess params reply)))
+
+(defun seance-review--permission-text (tool-call)
+  "Human-readable description and diff for TOOL-CALL."
+  (concat
+   (format "Codex requests: %s\n\n" (or (plist-get tool-call :title) "tool call"))
+   (mapconcat
+    (lambda (item)
+      (pcase (plist-get item :type)
+        ("diff" (seance-diff-strings (or (plist-get item :oldText) "")
+                                     (or (plist-get item :newText) "")
+                                     (plist-get item :path)))
+        (_ (format "%S\n" item))))
+    (append (plist-get tool-call :content) nil)
+    "\n")))
+
+(defvar seance-keys-permission-table
+  '((decision
+     ("a" seance-review-allow "Allow once")
+     ("d" seance-review-deny "Deny")
+     ("A" seance-review-allow-all "Allow all (rest of session)")))
+  "Binding table for the permission diff window.")
+
+(seance-keys-make-help 'seance-permission-help "seance permission bindings"
+                       seance-keys-permission-table)
+;; Defined at load time by the form above; tell the byte-compiler.
+(declare-function seance-permission-help "seance-review")
+
+(defun seance-review--show-permission (sess params reply)
+  "Display PARAMS' tool call in the permission buffer; REPLY answers later.
+SESS is stored buffer-locally so `seance-review-allow-all' can flip
+its permission mode."
+  (let ((buf (get-buffer-create seance-review-permission-buffer)))
+    (with-current-buffer buf
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert (seance-review--permission-text (plist-get params :toolCall)))
+        ;; The mode change wipes buffer-locals; set ours afterwards.
+        (diff-mode)
+        (let ((map (copy-keymap diff-mode-map)))
+          (seance-keys-apply seance-keys-permission-table map)
+          (define-key map (kbd "?") #'seance-permission-help)
+          (use-local-map map))
+        (setq buffer-read-only t)
+        (setq seance-review--reply reply
+              seance-review--options (plist-get params :options)
+              seance-review--session sess)))
+    (display-buffer buf '(display-buffer-in-side-window (side . right)))))
+
+(defun seance-review--answer (&rest kinds)
+  "Answer the pending permission request with the first option matching KINDS.
+Kills the permission buffer: once answered it is stale UI, and its
+existence doubles as the \"request pending\" signal."
+  (unless seance-review--reply
+    (user-error "No pending permission request"))
+  (let ((reply seance-review--reply)
+        (id (apply #'seance-review--pick-option seance-review--options kinds))
+        (buf (current-buffer)))
+    (setq seance-review--reply nil)
+    (if-let* ((win (get-buffer-window buf)))
+        (quit-window 'kill win)
+      (kill-buffer buf))
+    (funcall reply (seance-review--outcome id))))
+
+(defun seance-review-allow ()
+  "Allow this tool call once."
+  (interactive)
+  (seance-review--answer "allow_once" "allow_always"))
+
+(defun seance-review-deny ()
+  "Reject this tool call."
+  (interactive)
+  (seance-review--answer "reject_once" "reject_always"))
+
+(defun seance-review-allow-all ()
+  "Allow this and all further tool calls this session (switch to auto)."
+  (interactive)
+  (setf (seance-acp-session-permission-mode seance-review--session) 'auto)
+  (seance-review--answer "allow_always" "allow_once"))
+
+;; Register as the ACP permission handler.
+(setq seance-acp--permission-function #'seance-review-handle-permission)
+
+(provide 'seance-review)
+;;; seance-review.el ends here
