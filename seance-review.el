@@ -80,6 +80,13 @@ SESS is stored buffer-locally so `seance-review-allow-all' can flip
 its permission mode."
   (let ((buf (get-buffer-create seance-review-permission-buffer)))
     (with-current-buffer buf
+      ;; An unanswered earlier request would be orphaned by the rebuild
+      ;; below (diff-mode wipes the buffer-locals holding its reply), so
+      ;; answer it with the protocol's cancelled outcome first.
+      (when seance-review--reply
+        (let ((stale seance-review--reply))
+          (setq seance-review--reply nil)
+          (funcall stale '(:outcome (:outcome "cancelled")))))
       (let ((inhibit-read-only t))
         (erase-buffer)
         (insert (seance-review--permission-text (plist-get params :toolCall)))
@@ -123,8 +130,12 @@ existence doubles as the \"request pending\" signal."
 (defun seance-review-allow-all ()
   "Allow this and all further tool calls this session (switch to auto)."
   (interactive)
-  (setf (seance-acp-session-permission-mode seance-review--session) 'auto)
-  (seance-review--answer "allow_always" "allow_once"))
+  ;; Read the session local before --answer kills the buffer; flip the
+  ;; mode only after a successful answer (a failed answer must not
+  ;; silently disable gating).
+  (let ((sess seance-review--session))
+    (seance-review--answer "allow_always" "allow_once")
+    (setf (seance-acp-session-permission-mode sess) 'auto)))
 
 ;; Register as the ACP permission handler.
 (setq seance-acp--permission-function #'seance-review-handle-permission)

@@ -45,6 +45,24 @@
       (seance-review-deny))
     (should (equal (plist-get (plist-get answer :outcome) :optionId) "opt-reject"))))
 
+(ert-deftest seance-review-overlapping-request-cancels-first ()
+  "A second gated request must not orphan the first parked reply."
+  (let ((first nil) (second nil)
+        (sess (seance-review-test--session 'gated)))
+    (seance-review-handle-permission
+     sess seance-review-test--params
+     (lambda (result &optional _err) (setq first result)))
+    (seance-review-handle-permission
+     sess seance-review-test--params
+     (lambda (result &optional _err) (setq second result)))
+    ;; First request was answered cancelled, not dropped.
+    (should (equal (plist-get (plist-get first :outcome) :outcome) "cancelled"))
+    ;; Second request is the live one; answering it works normally.
+    (with-current-buffer "*seance permission*"
+      (seance-review-allow))
+    (should (equal (plist-get (plist-get second :outcome) :optionId)
+                   "opt-allow"))))
+
 (ert-deftest seance-review-allow-all-switches-session-to-auto ()
   (let ((answer nil)
         (sess (seance-review-test--session 'gated)))
