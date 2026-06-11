@@ -82,7 +82,8 @@
        (condition-case err
            (let* ((args (plist-get params :arguments))
                   (res (bridge-emacsclient (plist-get params :name)
-                                           (and args (json-serialize args)))))
+                                           (and args (json-serialize
+                                                      args :false-object :json-false)))))
              (bridge-send
               `(:jsonrpc "2.0" :id ,id
                 :result (:content [(:type "text" :text ,(or (plist-get res :value) ""))]
