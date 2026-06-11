@@ -1,6 +1,7 @@
 ;;; mock-agent.el --- scripted ACP agent for seance tests
 ;; Plays the agent side of ACP over stdio (ndjson). Scenario comes from
-;; the SEANCE_MOCK_SCENARIO env var: echo | tools | permission | fs.
+;; the SEANCE_MOCK_SCENARIO env var:
+;; echo | tools | permission | fs | init-error.
 
 (require 'json)
 (require 'cl-lib)
@@ -63,7 +64,10 @@
                   (:optionId "opt-allow-always" :name "Always" :kind "allow_always")
                   (:optionId "opt-reject" :name "Reject" :kind "reject_once")])
       (lambda (result)
-        (let ((opt (plist-get (plist-get result :outcome) :optionId)))
+        ;; RESULT is nil when the client answered with an error; report
+        ;; "picked: none" so the turn still ends.
+        (let ((opt (or (plist-get (plist-get result :outcome) :optionId)
+                       "none")))
           (mock-update "mock-session"
                        `(:sessionUpdate "agent_message_chunk"
                          :content (:type "text" :text ,(concat "picked: " opt))))
@@ -76,29 +80,41 @@
        (mock-request
         "fs/read_text_file" `(:sessionId ,sid :path ,path)
         (lambda (result)
-          (let ((content (plist-get result :content)))
-            (mock-request
-             "fs/write_text_file"
-             `(:sessionId ,sid :path ,path :content ,(upcase content))
-             (lambda (_)
-               (mock-update "mock-session"
-                            `(:sessionUpdate "agent_message_chunk"
-                              :content (:type "text" :text ,(concat "read: " content))))
-               (mock-end-turn (get 'mock-state 'prompt-id)))))))
+          ;; RESULT is nil when the read failed; skip the write, report the
+          ;; failure, and still end the turn so client tests cannot hang.
+          (let ((content (and result (plist-get result :content))))
+            (if (null content)
+                (progn
+                  (mock-update "mock-session"
+                               '(:sessionUpdate "agent_message_chunk"
+                                 :content (:type "text" :text "read-error")))
+                  (mock-end-turn (get 'mock-state 'prompt-id)))
+              (mock-request
+               "fs/write_text_file"
+               `(:sessionId ,sid :path ,path :content ,(upcase content))
+               (lambda (_)
+                 (mock-update "mock-session"
+                              `(:sessionUpdate "agent_message_chunk"
+                                :content (:type "text" :text ,(concat "read: " content))))
+                 (mock-end-turn (get 'mock-state 'prompt-id))))))))
        (put 'mock-state 'prompt-id id)))))
 
 (defun mock-handle (msg)
   (let ((id (plist-get msg :id))
         (method (plist-get msg :method)))
     (cond
-     ;; response to one of OUR requests
+     ;; response to one of OUR requests; error responses continue with nil
      ((and id (not method))
       (when-let* ((entry (assq id mock-pending)))
         (setq mock-pending (delq entry mock-pending))
-        (funcall (cdr entry) (plist-get msg :result))))
+        (funcall (cdr entry) (and (not (plist-get msg :error))
+                                  (plist-get msg :result)))))
      ((equal method "initialize")
-      (mock-result id '(:protocolVersion 1
-                        :agentCapabilities (:loadSession :json-false))))
+      (if (equal mock-scenario "init-error")
+          (mock-send (list :jsonrpc "2.0" :id id
+                           :error '(:code -32600 :message "nope")))
+        (mock-result id '(:protocolVersion 1
+                          :agentCapabilities (:loadSession :json-false)))))
      ((equal method "session/new")
       (mock-result id '(:sessionId "mock-session")))
      ((equal method "session/prompt")

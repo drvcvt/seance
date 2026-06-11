@@ -64,7 +64,11 @@ OPTS: :on-update :on-status :on-ready (each optional)."
        :clientCapabilities (:fs (:readTextFile t :writeTextFile t)))
      (lambda (_result error)
        (if error
-           (seance-acp--set-status sess 'error)
+           (progn
+             ;; Set 'error first: shutdown nils on-exit, so the status
+             ;; stays 'error rather than flipping to 'disconnected.
+             (seance-acp--set-status sess 'error)
+             (seance-rpc-shutdown rpc))
          (seance-rpc-request
           rpc "session/new"
           `(:cwd ,(seance-acp-session-cwd sess)
@@ -73,7 +77,9 @@ OPTS: :on-update :on-status :on-ready (each optional)."
                            []))
           (lambda (result error)
             (if error
-                (seance-acp--set-status sess 'error)
+                (progn
+                  (seance-acp--set-status sess 'error)
+                  (seance-rpc-shutdown rpc))
               (setf (seance-acp-session-id sess)
                     (plist-get result :sessionId))
               (seance-acp--set-status sess 'idle)
@@ -84,7 +90,10 @@ OPTS: :on-update :on-status :on-ready (each optional)."
 
 (defun seance-acp-prompt (sess text &optional callback)
   "Send TEXT as a prompt turn on SESS.
-CALLBACK gets (RESULT ERROR) at turn end."
+CALLBACK gets (RESULT ERROR) at turn end.
+Signal a `user-error' if SESS's adapter subprocess is not running."
+  (unless (seance-rpc-alive-p (seance-acp-session-rpc sess))
+    (user-error "seance: not connected"))
   (seance-acp--set-status sess 'thinking)
   (seance-rpc-request
    (seance-acp-session-rpc sess) "session/prompt"
