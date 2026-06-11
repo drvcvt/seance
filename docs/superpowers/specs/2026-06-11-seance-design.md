@@ -51,7 +51,11 @@ therefore modify and immediately test seance itself.
 ```
 
 - Emacs spawns the `codex-acp` adapter as a subprocess and speaks ACP
-  (JSON-RPC 2.0 over stdio) with it using the built-in `jsonrpc.el`.
+  (JSON-RPC 2.0 over stdio, newline-delimited JSON framing) with it via a
+  small own JSON-RPC layer (`seance-rpc.el`). The built-in `jsonrpc.el` is
+  not used: it assumes Content-Length header framing and can only answer
+  incoming requests synchronously, but ACP permission requests need
+  asynchronous replies (the agent waits while the user reviews a diff).
 - The adapter wraps Codex and uses the existing auth in `~/.codex`; no
   separate login flow is needed when the user is already logged in to the
   Codex CLI.
@@ -78,10 +82,17 @@ Defcustoms:
 - `seance-cwd-function` — returns session cwd; default: `project.el` root,
   falling back to `default-directory`.
 
+### `seance-rpc.el` — JSON-RPC transport (no ACP knowledge)
+
+Newline-delimited JSON-RPC 2.0 over a stdio subprocess: request/response
+correlation, notifications in both directions, and asynchronous reply
+callbacks for incoming requests. Pure transport; reusable for the mock
+agent in tests.
+
 ### `seance-acp.el` — protocol core (no UI)
 
-Owns the adapter process and the jsonrpc connection. Implements the ACP
-subset seance needs:
+Owns the adapter process and the `seance-rpc` connection. Implements the
+ACP subset seance needs:
 
 - Outgoing requests: `initialize`, `session/new` (with `cwd` and
   `mcpServers`), `session/prompt`, `session/cancel`.
