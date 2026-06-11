@@ -223,8 +223,15 @@ the original, :after of the FIRST entry seen is the final state."
 (defun seance-review ()
   "Show everything this session changed, as one reviewable unified diff."
   (interactive)
-  (let ((buf (get-buffer-create seance-review-buffer)))
+  ;; Compute the base directory from the caller's context BEFORE entering the
+  ;; review buffer, so the fallback is the invocation's default-directory, not
+  ;; whatever stale value the buffer may have inherited.
+  (let ((base-dir (or (and seance-acp--session
+                           (seance-acp-session-cwd seance-acp--session))
+                      default-directory))
+        (buf (get-buffer-create seance-review-buffer)))
     (with-current-buffer buf
+      (setq default-directory base-dir)
       (let ((inhibit-read-only t))
         (erase-buffer)
         (let ((groups (seance-review--coalesced)))
@@ -233,11 +240,7 @@ the original, :after of the FIRST entry seen is the final state."
             (dolist (g groups)
               (insert (seance-diff-strings
                        (nth 1 g) (nth 2 g)
-                       (file-relative-name
-                        (nth 0 g)
-                        (or (and seance-acp--session
-                                 (seance-acp-session-cwd seance-acp--session))
-                            default-directory)))))))
+                       (file-relative-name (nth 0 g) base-dir))))))
         (diff-mode)
         (let ((map (copy-keymap diff-mode-map)))
           (define-key map (kbd "?") #'seance-review-help)

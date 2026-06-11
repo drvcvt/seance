@@ -204,4 +204,19 @@
                   'seance-review-help))
       (kill-buffer))))
 
+(ert-deftest seance-review-buffer-default-directory-anchored-to-session-cwd ()
+  "The review buffer's default-directory must equal the session's cwd."
+  (let ((seance-acp--session
+         (seance-acp-session--make :cwd "/tmp/x/"))
+        (seance-review--edit-log
+         '((:path "/tmp/x/foo.el" :before "old\n" :after "new\n"))))
+    (unwind-protect
+        (progn
+          (seance-review)
+          (should (equal (with-current-buffer "*seance review*"
+                           default-directory)
+                         "/tmp/x/")))
+      (when (get-buffer "*seance review*")
+        (kill-buffer "*seance review*")))))
+
 ;;; seance-review-test.el ends here
