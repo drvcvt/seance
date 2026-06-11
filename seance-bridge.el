@@ -44,12 +44,19 @@
   "Read and eval FORM-STRING, gated by the permission mode."
   (unless form-string (error "emacs_eval needs a :form argument"))
   (when (eq (seance-bridge--permission-mode) 'gated)
+    (message "seance: full eval form: %s" form-string)
     (unless (y-or-n-p (format "seance: Codex wants to eval %s — allow? "
                               (truncate-string-to-width form-string 80 nil nil "…")))
       (error "User denied evaluation")))
-  (let ((print-length 200)
-        (print-level 20))
-    (format "%S" (eval (read form-string) t))))
+  (let* ((result (read-from-string form-string))
+         (form (car result))
+         (end-index (cdr result))
+         (tail (substring form-string end-index)))
+    (unless (string-match-p "\\`[[:space:]]*\\'" tail)
+      (error "emacs_eval: trailing content after first form"))
+    (let ((print-length 200)
+          (print-level 20))
+      (format "%S" (eval form t)))))
 
 (defun seance-bridge--buffer-list ()
   "One line per live buffer: name, major mode, file, modified flag."

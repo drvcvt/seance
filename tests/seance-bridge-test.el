@@ -55,4 +55,33 @@
         (should-not (plist-get res :ok))
         (should (string-match-p "denied" (plist-get res :value)))))))
 
+(ert-deftest seance-bridge-eval-trailing-form-rejected ()
+  "A form string with two sexps must error with a message about trailing content."
+  (let ((seance-permission-mode 'auto)
+        (seance-acp--session nil))
+    (let ((res (seance-bridge-test--call "emacs_eval" '(:form "(+ 1 2) (+ 3 4)"))))
+      (should (eq (plist-get res :ok) nil))
+      (should (string-match-p "trailing" (plist-get res :value))))))
+
+(ert-deftest seance-bridge-eval-trailing-whitespace-ok ()
+  "A form with only trailing whitespace/newline must be accepted."
+  (let ((seance-permission-mode 'auto)
+        (seance-acp--session nil))
+    (let ((res (seance-bridge-test--call "emacs_eval" '(:form "(+ 1 2)\n  "))))
+      (should (eq (plist-get res :ok) t))
+      (should (equal (plist-get res :value) "3")))))
+
+(ert-deftest seance-bridge-eval-gated-logs-full-form ()
+  "In gated mode, message must be called with the full form string before consent."
+  (let ((seance-permission-mode 'gated)
+        (seance-acp--session nil)
+        (captured-messages nil))
+    (cl-letf (((symbol-function 'message)
+               (lambda (fmt &rest args)
+                 (push (apply #'format fmt args) captured-messages)))
+              ((symbol-function 'y-or-n-p) (lambda (_prompt) t)))
+      (seance-bridge-test--call "emacs_eval" '(:form "(+ 10 20)")))
+    (should (cl-some (lambda (s) (string-search "(+ 10 20)" s))
+                     captured-messages))))
+
 ;;; seance-bridge-test.el ends here
