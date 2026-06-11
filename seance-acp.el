@@ -144,7 +144,9 @@ Signal a `user-error' if SESS's adapter subprocess is not running."
      (condition-case err
          (funcall reply `(:content ,(funcall (or seance-acp--fs-read-function
                                                  #'seance-acp--read-file-fallback)
-                                             (plist-get params :path))))
+                                             (expand-file-name
+                                              (plist-get params :path)
+                                              (seance-acp-session-cwd sess)))))
        (error (funcall reply nil `(:code -32603
                                    :message ,(error-message-string err))))))
     ("fs/write_text_file"
@@ -152,7 +154,10 @@ Signal a `user-error' if SESS's adapter subprocess is not running."
          (progn
            (funcall (or seance-acp--fs-write-function
                         #'seance-acp--write-file-fallback)
-                    (plist-get params :path) (plist-get params :content))
+                    (expand-file-name
+                     (plist-get params :path)
+                     (seance-acp-session-cwd sess))
+                    (plist-get params :content))
            (funcall reply nil))
        (error (funcall reply nil `(:code -32603
                                    :message ,(error-message-string err))))))

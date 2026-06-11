@@ -157,22 +157,29 @@ existence doubles as the \"request pending\" signal."
 (defun seance-review-write-file (path content)
   "Write CONTENT to PATH through Emacs, recording the edit.
 If a buffer visits PATH: replace its content; save only when the buffer
-had no unsaved user changes.  Otherwise write straight to disk."
+had no unsaved user changes.  Otherwise write straight to disk.
+The edit-log entry is pushed only after a successful write."
   (let ((before (if (or (find-buffer-visiting path) (file-exists-p path))
                     (seance-review-read-file path)
                   "")))
-    (push (list :path path :before before :after content)
-          seance-review--edit-log)
     (if-let* ((buf (find-buffer-visiting path)))
         (with-current-buffer buf
           (let ((was-clean (not (buffer-modified-p))))
             (let ((inhibit-read-only t))
-              (erase-buffer)
-              (insert content))
-            (when was-clean (save-buffer))))
+              (let ((tmp (generate-new-buffer " *seance-write-tmp*")))
+                (unwind-protect
+                    (progn
+                      (with-current-buffer tmp (insert content))
+                      (replace-buffer-contents tmp))
+                  (kill-buffer tmp))))
+            (when was-clean
+              (let ((inhibit-message t))
+                (save-buffer)))))
       (let ((dir (file-name-directory (expand-file-name path))))
         (make-directory dir t))
-      (write-region content nil path nil 'silent))))
+      (write-region content nil path nil 'silent))
+    (push (list :path path :before before :after content)
+          seance-review--edit-log)))
 
 (setq seance-acp--fs-read-function #'seance-review-read-file)
 (setq seance-acp--fs-write-function #'seance-review-write-file)

@@ -151,6 +151,12 @@
             (should (equal (plist-get e :path) file))))
       (delete-file file))))
 
+(ert-deftest seance-review-edit-log-not-updated-on-failed-write ()
+  "A write to an unwritable path must not push a phantom log entry."
+  (let ((seance-review--edit-log nil))
+    (should-error (seance-review-write-file "/proc/seance-test/x.txt" "hi\n"))
+    (should (null seance-review--edit-log))))
+
 (ert-deftest seance-review-fs-end-to-end-against-mock ()
   "Mock reads a file through us, writes it back uppercased."
   (let* ((file (make-temp-file "seance-fs" nil ".txt" "hello\n"))
