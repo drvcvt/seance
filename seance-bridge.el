@@ -117,9 +117,13 @@
             "")))
 
 (defun seance-bridge--script-path ()
-  "Absolute path of bin/seance-mcp-bridge.el."
+  "Absolute path of bin/seance-mcp-bridge.el.
+Resolves the library file's truename first: package managers like
+straight symlink the .el files into a build directory that does not
+contain bin/, so the path must be anchored at the real source tree."
   (expand-file-name "bin/seance-mcp-bridge.el"
-                    (file-name-directory (locate-library "seance-bridge"))))
+                    (file-name-directory
+                     (file-truename (locate-library "seance-bridge")))))
 
 (defun seance-bridge--server-live-p ()
   "Return non-nil if this Emacs has a live server process."
