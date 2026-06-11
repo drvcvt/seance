@@ -184,5 +184,66 @@ The edit-log entry is pushed only after a successful write."
 (setq seance-acp--fs-read-function #'seance-review-read-file)
 (setq seance-acp--fs-write-function #'seance-review-write-file)
 
+;; --- session review buffer -------------------------------------------------
+
+(defvar seance-review-buffer "*seance review*"
+  "Name of the session review buffer.")
+
+(defvar seance-keys-review-table
+  '((review
+     ("C-c C-a" diff-apply-hunk "Apply hunk (C-u: revert)")
+     ("n" diff-hunk-next "Next hunk")
+     ("p" diff-hunk-prev "Previous hunk")
+     ("q" quit-window "Quit")))
+  "Binding table shown in the review buffer's ? help.
+These are diff-mode's own bindings; the table only documents them.")
+
+(seance-keys-make-help 'seance-review-help "seance review bindings"
+                       seance-keys-review-table)
+;; Defined at load time by the form above; tell the byte-compiler.
+(declare-function seance-review-help "seance-review")
+
+(defun seance-review--coalesced ()
+  "Edit log grouped per file: (PATH FIRST-BEFORE LAST-AFTER), one entry per file.
+The log is newest-first, so per path: :before of the LAST entry seen is
+the original, :after of the FIRST entry seen is the final state."
+  (let ((per-file nil))  ; alist path -> (final-after original-before)
+    (dolist (e seance-review--edit-log)
+      (let* ((path (plist-get e :path))
+             (cell (assoc path per-file)))
+        (if cell
+            (setcdr (cdr cell) (list (plist-get e :before)))  ; older entry: update original
+          (push (cons path (list (plist-get e :after) (plist-get e :before)))
+                per-file))))
+    (mapcar (lambda (cell)
+              (list (car cell) (nth 1 (cdr cell)) (nth 0 (cdr cell))))
+            (nreverse per-file))))
+
+;;;###autoload
+(defun seance-review ()
+  "Show everything this session changed, as one reviewable unified diff."
+  (interactive)
+  (let ((buf (get-buffer-create seance-review-buffer)))
+    (with-current-buffer buf
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (let ((groups (seance-review--coalesced)))
+          (if (null groups)
+              (insert "No edits recorded in this session.\n")
+            (dolist (g groups)
+              (insert (seance-diff-strings
+                       (nth 1 g) (nth 2 g)
+                       (file-relative-name
+                        (nth 0 g)
+                        (or (and seance-acp--session
+                                 (seance-acp-session-cwd seance-acp--session))
+                            default-directory)))))))
+        (diff-mode)
+        (let ((map (copy-keymap diff-mode-map)))
+          (define-key map (kbd "?") #'seance-review-help)
+          (use-local-map map))
+        (setq buffer-read-only t)))
+    (pop-to-buffer buf)))
+
 (provide 'seance-review)
 ;;; seance-review.el ends here

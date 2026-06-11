@@ -178,4 +178,30 @@
       (seance-acp-disconnect sess)
       (delete-file file))))
 
+(ert-deftest seance-review-buffer-coalesces-per-file ()
+  "Multiple edits to one file show as ONE diff: first before vs last after."
+  (let ((seance-review--edit-log
+         ;; newest first
+         '((:path "/tmp/x/b.el" :before "b1\n" :after "b2\n")
+           (:path "/tmp/x/a.el" :before "a2\n" :after "a3\n")
+           (:path "/tmp/x/a.el" :before "a1\n" :after "a2\n"))))
+    (seance-review)
+    (with-current-buffer "*seance review*"
+      (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+        (should (string-match-p "^-a1$" text))
+        (should (string-match-p "^\\+a3$" text))
+        (should-not (string-match-p "a2" text))   ; intermediate state hidden
+        (should (string-match-p "^-b1$" text))
+        (should (derived-mode-p 'diff-mode)))
+      (kill-buffer))))
+
+(ert-deftest seance-review-buffer-empty-log ()
+  (let ((seance-review--edit-log nil))
+    (seance-review)
+    (with-current-buffer "*seance review*"
+      (should (string-match-p "No edits recorded" (buffer-string)))
+      (should (eq (lookup-key (current-local-map) (kbd "?"))
+                  'seance-review-help))
+      (kill-buffer))))
+
 ;;; seance-review-test.el ends here
