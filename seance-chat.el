@@ -9,6 +9,7 @@
 
 (require 'cl-lib)
 (require 'seance-acp)
+(require 'seance-diff)
 
 (defvar seance-chat-buffer-name "*seance*"
   "Name of the seance chat buffer.")
@@ -38,6 +39,17 @@
   "Type of the currently streaming block: nil, `message' or `thought'.")
 (defvar-local seance-chat--tool-regions nil
   "Hash table toolCallId -> plist (:start MARKER :end MARKER :detail-ov OVERLAY).")
+(defvar-local seance-chat--tool-cache nil
+  "Hash table toolCallId -> last merged tool plist (updates may be partial).")
+(defvar-local seance-chat--plan-start nil
+  "Start marker of the rendered plan block, nil before the first plan.")
+(defvar-local seance-chat--plan-end nil
+  "End marker of the rendered plan block, nil before the first plan.")
+
+(defconst seance-chat--status-icons
+  '(("pending" . "⏳") ("in_progress" . "⏳")
+    ("completed" . "✓") ("failed" . "✗"))
+  "Alist mapping tool-call status strings to display icons.")
 
 (defvar seance-chat-mode-map (make-sparse-keymap)
   "Keymap for `seance-chat-mode'.")
@@ -123,11 +135,15 @@
                              (with-current-buffer buf
                                (seance-chat--end-turn err)))))))))
 
-(defun seance-chat--end-turn (err)
-  "Close the streaming block at turn end; render ERR if non-nil."
+(defun seance-chat--close-block ()
+  "Close the current streaming block, if any, with a blank-line separator."
   (when seance-chat--block
     (seance-chat--insert-output "\n\n")
-    (setq seance-chat--block nil))
+    (setq seance-chat--block nil)))
+
+(defun seance-chat--end-turn (err)
+  "Close the streaming block at turn end; render ERR if non-nil."
+  (seance-chat--close-block)
   (when err
     (seance-chat--insert-output (format "[error] %s\n\n" err))))
 
@@ -178,7 +194,9 @@
     ("agent_thought_chunk"
      (seance-chat--stream-chunk
       'thought (plist-get (plist-get update :content) :text)))
-    ;; tool_call / tool_call_update / plan are implemented in Task 5
+    ("tool_call" (seance-chat--render-tool update))
+    ("tool_call_update" (seance-chat--render-tool update))
+    ("plan" (seance-chat--render-plan update))
     (_ nil)))
 
 (defun seance-chat--stream-chunk (type text)
@@ -193,12 +211,116 @@
          (propertize text 'face 'seance-thought-face)
        text))))
 
+;; --- tool calls and plan ---------------------------------------------------
+
+(defun seance-chat--tool-merged (update)
+  "Merge UPDATE into the cached state for its toolCallId; return merged plist."
+  (unless seance-chat--tool-cache
+    (setq seance-chat--tool-cache (make-hash-table :test #'equal)))
+  (let* ((id (plist-get update :toolCallId))
+         (old (gethash id seance-chat--tool-cache))
+         (merged (copy-sequence (or old '()))))
+    (cl-loop for (k v) on update by #'cddr
+             do (setq merged (plist-put merged k v)))
+    (puthash id merged seance-chat--tool-cache)
+    merged))
+
+(defun seance-chat--tool-header-line (tool)
+  "Return the propertized one-line header for the TOOL plist."
+  (let* ((status (or (plist-get tool :status) "pending"))
+         (icon (or (cdr (assoc status seance-chat--status-icons)) "·")))
+    (propertize
+     (format "▸ %s %s %s" icon (or (plist-get tool :kind) "tool")
+             (or (plist-get tool :title) (plist-get tool :toolCallId)))
+     'face 'seance-tool-face)))
+
+(defun seance-chat--tool-detail (tool)
+  "Multi-line detail text for TOOL: diffs and text content."
+  (mapconcat
+   (lambda (item)
+     (pcase (plist-get item :type)
+       ("diff" (seance-diff-strings (or (plist-get item :oldText) "")
+                                    (or (plist-get item :newText) "")
+                                    (plist-get item :path)))
+       ("content" (or (plist-get (plist-get item :content) :text) ""))
+       (_ (format "%S" item))))
+   (append (plist-get tool :content) nil)
+   "\n"))
+
+(defun seance-chat--render-tool (update)
+  "Render or in-place update the entry for UPDATE's toolCallId."
+  (seance-chat--close-block)
+  (let* ((tool (seance-chat--tool-merged update))
+         (id (plist-get tool :toolCallId))
+         (entry (gethash id seance-chat--tool-regions))
+         (header (seance-chat--tool-header-line tool))
+         (detail (seance-chat--tool-detail tool))
+         (inhibit-read-only t))
+    (when entry  ; wipe the old region (markers + overlay)
+      (delete-overlay (plist-get entry :detail-ov))
+      (delete-region (plist-get entry :start) (plist-get entry :end)))
+    (save-excursion
+      (goto-char seance-chat--output-marker)
+      (let ((start (point-marker)))
+        (set-marker-insertion-type start nil)
+        (insert (propertize (concat header "\n")
+                            'seance-tool-id id 'read-only t 'rear-nonsticky t))
+        (let ((dstart (point)))
+          (unless (string-empty-p detail)
+            (insert (propertize (concat detail "\n")
+                                'seance-tool-id id 'read-only t 'rear-nonsticky t)))
+          (let ((ov (make-overlay dstart (point)))
+                (end (point-marker)))
+            (overlay-put ov 'invisible
+                         (if entry  ; preserve user's toggle state across updates
+                             (overlay-get (plist-get entry :detail-ov) 'invisible)
+                           t))
+            (overlay-put ov 'evaporate nil)
+            (puthash id (list :start start :end end :detail-ov ov)
+                     seance-chat--tool-regions)))))))
+
+(defun seance-chat-toggle-detail ()
+  "Toggle visibility of the tool-call detail at point."
+  (interactive)
+  (if-let* ((id (get-text-property (line-beginning-position) 'seance-tool-id))
+            (entry (gethash id seance-chat--tool-regions))
+            (ov (plist-get entry :detail-ov)))
+      (overlay-put ov 'invisible (not (overlay-get ov 'invisible)))
+    (message "seance: no tool call at point")))
+
+(defun seance-chat--render-plan (update)
+  "Render UPDATE's plan block, replacing the previous one in place."
+  (seance-chat--close-block)
+  (let* ((text (concat "Plan\n"
+                       (mapconcat
+                        (lambda (e)
+                          (format " %s %s"
+                                  (pcase (plist-get e :status)
+                                    ("completed" "☑")
+                                    ("in_progress" "◐")
+                                    (_ "☐"))
+                                  (plist-get e :content)))
+                        (append (plist-get update :entries) nil) "\n")
+                       "\n"))
+         (inhibit-read-only t))
+    (when seance-chat--plan-start
+      (delete-region seance-chat--plan-start seance-chat--plan-end))
+    (save-excursion
+      (goto-char seance-chat--output-marker)
+      (let ((start (point-marker)))
+        (set-marker-insertion-type start nil)
+        (insert (propertize text 'read-only t 'rear-nonsticky t
+                            'face 'seance-thought-face))
+        (setq seance-chat--plan-start start
+              seance-chat--plan-end (point-marker))))))
+
 ;; keybindings are centralized in seance-keys.el (Task 6); minimal set now:
 (define-key seance-chat-mode-map (kbd "RET") #'seance-chat-send)
 (define-key seance-chat-mode-map (kbd "S-<return>") #'seance-chat-newline)
 (define-key seance-chat-mode-map (kbd "M-p") #'seance-chat-history-prev)
 (define-key seance-chat-mode-map (kbd "M-n") #'seance-chat-history-next)
 (define-key seance-chat-mode-map (kbd "C-c C-k") #'seance-chat-cancel)
+(define-key seance-chat-mode-map (kbd "TAB") #'seance-chat-toggle-detail)
 
 (provide 'seance-chat)
 ;;; seance-chat.el ends here

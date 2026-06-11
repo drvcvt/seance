@@ -84,4 +84,27 @@ session being disconnected."
     (seance-chat--stream-chunk 'thought "c")
     (should (string-match-p "a\n\nb\n\nc" (buffer-string)))))
 
+(ert-deftest seance-chat-tool-call-renders-and-updates ()
+  (seance-chat-test--with-buffer "tools"
+    (seance-chat-test--send-and-finish "go")
+    (let ((text (buffer-string)))
+      ;; header line updated in place: completed icon, not two entries
+      (should (string-match-p "✓ edit edit hello.el" text))
+      (should-not (string-match-p "⏳" text))
+      ;; plan block rendered
+      (should (string-match-p "☑ step one" text))
+      (should (string-match-p "☐ step two" text)))
+    ;; detail (the diff) exists but is invisible until toggled
+    (goto-char (point-min))
+    (search-forward "✓ edit")
+    (beginning-of-line)
+    (let* ((id (get-text-property (point) 'seance-tool-id))
+           (entry (gethash id seance-chat--tool-regions))
+           (ov (plist-get entry :detail-ov)))
+      (should (overlay-get ov 'invisible))
+      (seance-chat-toggle-detail)
+      (should-not (overlay-get ov 'invisible))
+      (should (string-match-p "-old line" (buffer-substring-no-properties
+                                           (overlay-start ov) (overlay-end ov)))))))
+
 ;;; seance-chat-test.el ends here
