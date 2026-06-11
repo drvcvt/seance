@@ -50,12 +50,26 @@ CALLBACK is called as (RESULT ERROR) when the response arrives."
         (method (plist-get msg :method)))
     (cond
      ((and method id)                   ; incoming request
-      (funcall (seance-rpc-handler rpc) method (plist-get msg :params)
-               (lambda (result &optional error)
-                 (seance-rpc--send
-                  rpc (if error
-                          `(:jsonrpc "2.0" :id ,id :error ,error)
-                        `(:jsonrpc "2.0" :id ,id :result ,(or result :null)))))))
+      (let ((replied nil))
+        (condition-case err
+            (funcall (seance-rpc-handler rpc) method (plist-get msg :params)
+                     (lambda (result &optional error)
+                       (unless replied
+                         (setq replied t)
+                         (seance-rpc--send
+                          rpc (if error
+                                  `(:jsonrpc "2.0" :id ,id :error ,error)
+                                `(:jsonrpc "2.0" :id ,id
+                                  :result ,(or result :null)))))))
+          (error
+           (message "seance-rpc: handler error on %s: %s"
+                    method (error-message-string err))
+           (unless replied
+             (setq replied t)
+             (seance-rpc--send
+              rpc `(:jsonrpc "2.0" :id ,id
+                    :error (:code -32603
+                            :message ,(error-message-string err)))))))))
      (method                            ; notification
       (funcall (seance-rpc-notifier rpc) method (plist-get msg :params)))
      (id                                ; response to our request
@@ -75,6 +89,16 @@ CALLBACK is called as (RESULT ERROR) when the response arrives."
           (error (message "seance-rpc: bad message dropped: %s"
                           (error-message-string err))))))))
 
+(defun seance-rpc--fail-pending (rpc)
+  "Reject every pending callback on RPC with a connection-closed error.
+Clears the pending table first, so repeated calls are no-ops."
+  (let ((pending (seance-rpc-pending rpc))
+        (callbacks nil))
+    (maphash (lambda (_id cb) (push cb callbacks)) pending)
+    (clrhash pending)
+    (dolist (cb callbacks)
+      (funcall cb nil '(:code -32000 :message "seance-rpc: connection closed")))))
+
 (defun seance-rpc-start (command &rest opts)
   "Start subprocess COMMAND (list of strings); return a `seance-rpc'.
 OPTS plist: :handler :notifier :on-exit :name."
@@ -82,15 +106,18 @@ OPTS plist: :handler :notifier :on-exit :name."
                :handler (or (plist-get opts :handler) #'ignore)
                :notifier (or (plist-get opts :notifier) #'ignore)
                :on-exit (plist-get opts :on-exit)))
+         (name (or (plist-get opts :name) "seance-rpc"))
          (proc (make-process
-                :name (or (plist-get opts :name) "seance-rpc")
+                :name name
                 :command command
                 :connection-type 'pipe
                 :coding 'utf-8-unix
                 :noquery t
-                :stderr (get-buffer-create " *seance-rpc-stderr*")
+                :stderr (get-buffer-create (format " *%s-stderr*" name))
                 :filter (lambda (_p s) (seance-rpc--filter rpc s))
-                :sentinel (lambda (_p event)
+                :sentinel (lambda (p event)
+                            (unless (process-live-p p)
+                              (seance-rpc--fail-pending rpc))
                             (when-let* ((fn (seance-rpc-on-exit rpc)))
                               (funcall fn event))))))
     (setf (seance-rpc-process rpc) proc)
@@ -105,7 +132,8 @@ OPTS plist: :handler :notifier :on-exit :name."
   "Kill RPC's subprocess without firing its on-exit callback."
   (when (seance-rpc-alive-p rpc)
     (setf (seance-rpc-on-exit rpc) nil)
-    (delete-process (seance-rpc-process rpc))))
+    (delete-process (seance-rpc-process rpc)))
+  (seance-rpc--fail-pending rpc))
 
 (provide 'seance-rpc)
 ;;; seance-rpc.el ends here
