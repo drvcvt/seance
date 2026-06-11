@@ -83,12 +83,14 @@ session being disconnected."
     (should (null seance-acp--session))))
 
 (ert-deftest seance-chat-thought-message-thought-separation ()
-  "Alternating thought/message blocks are separated by blank lines."
+  "Alternating thought/message blocks are separated by blank lines.
+Adapted for Task 13: thought blocks now carry a ▸ Thinking… header line."
   (seance-chat-test--with-buffer "echo"
     (seance-chat--stream-chunk 'thought "a")
     (seance-chat--stream-chunk 'message "b")
     (seance-chat--stream-chunk 'thought "c")
-    (should (string-match-p "a\n\nb\n\nc" (buffer-string)))))
+    (should (string-match-p "▸ Thinking…\na\n\nb\n\n▸ Thinking…\nc"
+                            (buffer-string)))))
 
 (ert-deftest seance-chat-tool-call-renders-and-updates ()
   (seance-chat-test--with-buffer "tools"
@@ -112,5 +114,39 @@ session being disconnected."
       (should-not (overlay-get ov 'invisible))
       (should (string-match-p "-old line" (buffer-substring-no-properties
                                            (overlay-start ov) (overlay-end ov)))))))
+
+(ert-deftest seance-chat-fontifies-closed-code-fence ()
+  (seance-chat-test--with-buffer "echo"
+    ;; simulate streamed chunks forming a fenced block
+    (seance-chat--stream-chunk 'message "look:\n```elisp\n(defun f ())\n")
+    (seance-chat--stream-chunk 'message "```\ntail")
+    (seance-chat--close-block)
+    (goto-char (point-min))
+    (search-forward "(defun")
+    (backward-word)
+    (should (eq (get-text-property (point) 'face) 'font-lock-keyword-face))))
+
+(ert-deftest seance-chat-thought-block-collapsed-by-default ()
+  (seance-chat-test--with-buffer "echo"
+    (seance-chat--stream-chunk 'thought "secret reasoning")
+    (seance-chat--stream-chunk 'message "visible answer")
+    (let ((ov (seance-chat--thought-overlay-at
+               (progn (goto-char (point-min))
+                      (search-forward "Thinking")
+                      (point)))))
+      (should ov)
+      (should (overlay-get ov 'invisible)))))
+
+(ert-deftest seance-chat-toggle-thought-via-tab-command ()
+  (seance-chat-test--with-buffer "echo"
+    (seance-chat--stream-chunk 'thought "hidden words")
+    (seance-chat--close-block)
+    (goto-char (point-min))
+    (search-forward "Thinking")
+    (beginning-of-line)
+    (seance-chat-toggle-thought)
+    (let ((ov (seance-chat--thought-overlay-at (line-end-position))))
+      (should ov)
+      (should-not (overlay-get ov 'invisible)))))
 
 ;;; seance-chat-test.el ends here

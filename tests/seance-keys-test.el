@@ -6,7 +6,9 @@
 
 (ert-deftest seance-keys-table-installed-in-chat-map ()
   (should (eq (lookup-key seance-chat-mode-map (kbd "RET")) #'seance-chat-send))
-  (should (eq (lookup-key seance-chat-mode-map (kbd "TAB")) #'seance-chat-toggle-detail))
+  ;; TAB routes through the thought toggle, which falls back to tool detail
+  ;; (adapted for Task 13's collapsible thought blocks).
+  (should (eq (lookup-key seance-chat-mode-map (kbd "TAB")) #'seance-chat-toggle-thought))
   (should (eq (lookup-key seance-chat-mode-map (kbd "C-c C-p"))
               #'seance-toggle-permission-mode)))
 

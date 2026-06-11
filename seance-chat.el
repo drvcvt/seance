@@ -8,6 +8,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'seq)
 (require 'seance-acp)
 (require 'seance-context)
 (require 'seance-diff)
@@ -38,6 +39,10 @@
   "Input field content stashed when history cycling started.")
 (defvar-local seance-chat--block nil
   "Type of the currently streaming block: nil, `message' or `thought'.")
+(defvar-local seance-chat--block-start nil
+  "Marker: start of the currently streaming block (for finalize passes).")
+(defvar-local seance-chat--thought-ov nil
+  "Overlay hiding the current thought block's body.")
 (defvar-local seance-chat--tool-regions nil
   "Hash table toolCallId -> plist (:start MARKER :end MARKER :detail-ov OVERLAY).")
 (defvar-local seance-chat--tool-cache nil
@@ -137,10 +142,18 @@
                                (seance-chat--end-turn err)))))))))
 
 (defun seance-chat--close-block ()
-  "Close the current streaming block, if any, with a blank-line separator."
+  "Close the open streaming block: finalize rendering, separate, reset.
+Completed message blocks get their markdown code fences fontified."
+  (when (and (eq seance-chat--block 'message) seance-chat--block-start)
+    (seance-chat--fontify-markdown (marker-position seance-chat--block-start)
+                                   (marker-position seance-chat--output-marker)))
   (when seance-chat--block
-    (seance-chat--insert-output "\n\n")
-    (setq seance-chat--block nil)))
+    (seance-chat--insert-output "\n\n"))
+  (when seance-chat--block-start
+    (set-marker seance-chat--block-start nil))
+  (setq seance-chat--block nil
+        seance-chat--block-start nil
+        seance-chat--thought-ov nil))
 
 (defun seance-chat--end-turn (err)
   "Close the streaming block at turn end; render ERR if non-nil."
@@ -201,16 +214,92 @@
     (_ nil)))
 
 (defun seance-chat--stream-chunk (type text)
-  "Append TEXT to the current streaming block of TYPE (message/thought)."
+  "Append TEXT to the current streaming block of TYPE (message/thought).
+Thought blocks render as a collapsed \"▸ Thinking…\" header whose
+streamed body is hidden by an invisible overlay (TAB toggles it)."
   (when text
     (unless (eq seance-chat--block type)
-      (unless (null seance-chat--block)
-        (seance-chat--insert-output "\n\n"))
-      (setq seance-chat--block type))
+      (seance-chat--close-block)
+      (setq seance-chat--block type)
+      (setq seance-chat--block-start
+            (copy-marker seance-chat--output-marker nil))
+      (when (eq type 'thought)
+        (seance-chat--insert-output
+         (propertize "▸ Thinking…\n" 'face 'seance-thought-face
+                     'seance-thought-header t))
+        (let ((pos (marker-position seance-chat--output-marker)))
+          (setq seance-chat--thought-ov (make-overlay pos pos))
+          (overlay-put seance-chat--thought-ov 'seance-thought t)
+          (overlay-put seance-chat--thought-ov 'invisible t))))
     (seance-chat--insert-output
      (if (eq type 'thought)
          (propertize text 'face 'seance-thought-face)
-       text))))
+       text))
+    (when (and (eq type 'thought) seance-chat--thought-ov)
+      ;; Grow the hiding overlay to cover the streamed body.  The "\n\n"
+      ;; separator inserted later at the overlay's end does NOT extend it
+      ;; (rear-advance is nil), so the separator stays visible.
+      (move-overlay seance-chat--thought-ov
+                    (overlay-start seance-chat--thought-ov)
+                    (marker-position seance-chat--output-marker)))))
+
+(defun seance-chat--thought-overlay-at (pos)
+  "Return the thought-hiding overlay at or shortly after POS, if any."
+  (seq-find (lambda (ov) (overlay-get ov 'seance-thought))
+            (overlays-in pos (min (point-max) (+ pos 2000)))))
+
+(defun seance-chat-toggle-thought ()
+  "Toggle the thought block at point; fall back to tool-call details."
+  (interactive)
+  (if-let* ((ov (and (get-text-property (line-beginning-position)
+                                        'seance-thought-header)
+                     (seance-chat--thought-overlay-at (line-end-position)))))
+      (overlay-put ov 'invisible (not (overlay-get ov 'invisible)))
+    (seance-chat-toggle-detail)))
+
+(defun seance-chat--fontify-markdown (start end)
+  "Fontify completed markdown code fences between START and END."
+  (let ((inhibit-read-only t))
+    (save-excursion
+      (goto-char start)
+      (while (re-search-forward "^```\\([a-zA-Z-]*\\)\n" end t)
+        (let* ((lang (match-string 1))
+               (body-start (point))
+               (close-end (re-search-forward "^```$" end t)))
+          (when close-end
+            ;; The fontify pass replaces the body with an equal-length
+            ;; string, so CLOSE-END stays valid afterwards.
+            (seance-chat--fontify-region-as
+             body-start (match-beginning 0) lang)
+            (goto-char close-end)))))))
+
+(defun seance-chat--fontify-region-as (start end lang)
+  "Apply LANG mode font-lock faces to the region START..END."
+  (let* ((text (buffer-substring-no-properties start end))
+         (mode (intern-soft (concat (if (member lang '("elisp" "emacs-lisp" "lisp"))
+                                        "emacs-lisp" lang)
+                                    "-mode")))
+         (fontified
+          (if (and mode (fboundp mode))
+              (with-temp-buffer
+                (insert text)
+                (delay-mode-hooks (funcall mode))
+                (font-lock-ensure)
+                ;; normalize font-lock-face → face so it renders without font-lock
+                (let ((pos (point-min)))
+                  (while (< pos (point-max))
+                    (let ((f (or (get-text-property pos 'face)
+                                 (get-text-property pos 'font-lock-face)))
+                          (next (or (next-single-property-change pos 'face)
+                                    (point-max))))
+                      (when f (put-text-property pos next 'face f))
+                      (setq pos next))))
+                (buffer-string))
+            text)))
+    (delete-region start end)
+    (goto-char start)
+    (insert (propertize fontified 'read-only t 'rear-nonsticky t
+                        'front-sticky '(read-only)))))
 
 ;; --- tool calls and plan ---------------------------------------------------
 
@@ -333,7 +422,7 @@
      ("M-p" seance-chat-history-prev "Previous input")
      ("M-n" seance-chat-history-next "Next input"))
     (conversation
-     ("TAB" seance-chat-toggle-detail "Toggle tool-call detail")
+     ("TAB" seance-chat-toggle-thought "Toggle thought/tool detail at point")
      ("C-c C-k" seance-chat-cancel "Cancel current turn"))
     (session
      ("C-c C-p" seance-toggle-permission-mode "Toggle gated/auto")
