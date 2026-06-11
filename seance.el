@@ -95,5 +95,17 @@ collects edits for later review."
         (force-mode-line-update t))
     (user-error "No active seance session")))
 
+;; Deliberately NOT a plain `autoload': transient force-loads autoloaded
+;; suffix commands when the `?' help menu opens (transient--init-suffix
+;; calls `autoload-do-load'), which would signal file-missing until
+;; seance-review.el exists (Task 9).  This trampoline keeps the menu
+;; openable now; loading seance-review.el replaces it with the real
+;; command, after which the recursive call below dispatches to it.
+(defun seance-review ()
+  "Open the seance session review buffer."
+  (interactive)
+  (require 'seance-review)
+  (seance-review))
+
 (provide 'seance)
 ;;; seance.el ends here

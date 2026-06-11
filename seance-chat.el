@@ -321,13 +321,43 @@
         (setq seance-chat--plan-start start
               seance-chat--plan-end (point-marker))))))
 
-;; keybindings are centralized in seance-keys.el (Task 6); minimal set now:
-(define-key seance-chat-mode-map (kbd "RET") #'seance-chat-send)
-(define-key seance-chat-mode-map (kbd "S-<return>") #'seance-chat-newline)
-(define-key seance-chat-mode-map (kbd "M-p") #'seance-chat-history-prev)
-(define-key seance-chat-mode-map (kbd "M-n") #'seance-chat-history-next)
-(define-key seance-chat-mode-map (kbd "C-c C-k") #'seance-chat-cancel)
-(define-key seance-chat-mode-map (kbd "TAB") #'seance-chat-toggle-detail)
+;; --- bindings: one table drives the keymap AND the ? help ----------------
+
+(require 'seance-keys)
+
+(defvar seance-keys-chat-table
+  '((input
+     ("RET" seance-chat-send "Send prompt")
+     ("S-<return>" seance-chat-newline "Insert newline")
+     ("M-p" seance-chat-history-prev "Previous input")
+     ("M-n" seance-chat-history-next "Next input"))
+    (conversation
+     ("TAB" seance-chat-toggle-detail "Toggle tool-call detail")
+     ("C-c C-k" seance-chat-cancel "Cancel current turn"))
+    (session
+     ("C-c C-p" seance-toggle-permission-mode "Toggle gated/auto")
+     ("C-c C-r" seance-review "Open session review")
+     ("C-c C-q" seance-stop "Stop session")))
+  "Binding table for `seance-chat-mode' (drives keymap AND ? help).")
+
+(seance-keys-apply seance-keys-chat-table seance-chat-mode-map)
+(seance-keys-make-help 'seance-chat-help "seance chat bindings"
+                       seance-keys-chat-table)
+
+;; The transient prefix above is defined at load time via `eval'; the
+;; byte-compiler cannot see it, hence the declaration.
+(declare-function seance-chat-help "seance-chat")
+
+(defun seance-chat-help-or-self-insert (n)
+  "Open the binding help, unless point is in the input field (then type ?).
+N is the prefix-argument repeat count for `self-insert-command'."
+  (interactive "p")
+  (if (and seance-chat--prompt-marker
+           (>= (point) seance-chat--prompt-marker))
+      (self-insert-command n ??)
+    (seance-chat-help)))
+
+(define-key seance-chat-mode-map (kbd "?") #'seance-chat-help-or-self-insert)
 
 (provide 'seance-chat)
 ;;; seance-chat.el ends here
