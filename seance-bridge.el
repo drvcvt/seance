@@ -8,6 +8,7 @@
 ;;; Code:
 
 (require 'json)
+(require 'server)
 (require 'seance)
 
 (declare-function seance-acp-session-permission-mode "seance-acp")
@@ -114,6 +115,38 @@
                 (buffer-substring-no-properties
                  (max (point-min) (- (point-max) 2000)) (point-max)))
             "")))
+
+(defun seance-bridge--script-path ()
+  "Absolute path of bin/seance-mcp-bridge.el."
+  (expand-file-name "bin/seance-mcp-bridge.el"
+                    (file-name-directory (locate-library "seance-bridge"))))
+
+(defun seance-bridge--server-live-p ()
+  "Return non-nil if this Emacs has a live server process."
+  (and server-process (process-live-p server-process)))
+
+(defun seance-bridge-mcp-servers ()
+  "Vector of MCP server specs to hand to ACP session/new.
+Returns [] when `seance-enable-bridge' is nil.  In noninteractive
+Emacs a server is never auto-started: batch sessions rarely want one
+implicitly (and the test suite manages its own), so without an
+already-running server this also returns [].  Interactively, the
+server is started on demand.  SEANCE_SERVER carries the ABSOLUTE
+socket path -- emacsclient -s accepts a full path as well as a bare
+name -- so the bridge script finds the server even when
+`server-socket-dir' is non-default."
+  (cond
+   ((not seance-enable-bridge) [])
+   ((and noninteractive (not (seance-bridge--server-live-p))) [])
+   (t
+    (unless (seance-bridge--server-live-p)
+      (server-start))
+    (vector
+     `(:name "seance-emacs"
+       :command ,(expand-file-name invocation-name invocation-directory)
+       :args ["--batch" "--script" ,(seance-bridge--script-path)]
+       :env [(:name "SEANCE_SERVER"
+              :value ,(expand-file-name server-name server-socket-dir))])))))
 
 (provide 'seance-bridge)
 ;;; seance-bridge.el ends here

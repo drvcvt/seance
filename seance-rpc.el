@@ -26,9 +26,12 @@
                      :null-object nil :false-object :json-false))
 
 (defun seance-rpc--send (rpc msg)
-  "Serialize plist MSG and send it to RPC's subprocess as one line."
+  "Serialize plist MSG and send it to RPC's subprocess as one line.
+Serializes `:json-false' as false, mirroring `seance-rpc--parse', so
+parsed values can round-trip back out."
   (process-send-string (seance-rpc-process rpc)
-                       (concat (json-serialize msg) "\n")))
+                       (concat (json-serialize msg :false-object :json-false)
+                               "\n")))
 
 (defun seance-rpc-request (rpc method params callback)
   "Send request METHOD with PARAMS plist over RPC; return the request id.

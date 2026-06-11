@@ -10,6 +10,8 @@
 (require 'seance)
 (require 'seance-rpc)
 
+(declare-function seance-bridge-mcp-servers "seance-bridge")
+
 (defvar seance-acp--fs-read-function nil
   "When set, (fn PATH) -> string; serves fs/read_text_file.  Set in Task 8.")
 (defvar seance-acp--fs-write-function nil
@@ -47,6 +49,12 @@ OPTS: :on-update :on-status :on-ready (each optional)."
   ;; Registers the permission handler; required lazily here because
   ;; seance-review requires seance-acp (load cycle at top level).
   (require 'seance-review)
+  ;; Default MCP-server hook: expose the emacs_* live-eval bridge.
+  ;; `seance-bridge-mcp-servers' itself decides whether to offer anything
+  ;; (defcustom gate; never auto-starts a server in noninteractive Emacs).
+  (require 'seance-bridge)
+  (unless seance-acp--mcp-servers-function
+    (setq seance-acp--mcp-servers-function #'seance-bridge-mcp-servers))
   (let* ((sess (seance-acp-session--make
                 :cwd (expand-file-name cwd)
                 :on-update (plist-get opts :on-update)
