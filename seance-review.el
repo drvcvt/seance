@@ -15,6 +15,13 @@
 (defvar seance-review-permission-buffer "*seance permission*"
   "Name of the buffer showing pending permission requests.")
 
+(defvar seance-review-on-pending nil
+  "When non-nil, called with no args after a gated request is displayed.
+Consumers (e.g. the chat buffer) use it to show a waiting indicator.")
+(defvar seance-review-on-answered nil
+  "When non-nil, called with no args after a pending request is answered.
+Counterpart of `seance-review-on-pending'.")
+
 (defvar-local seance-review--reply nil
   "Pending REPLY closure for the displayed permission request.")
 (defvar-local seance-review--options nil
@@ -100,7 +107,12 @@ its permission mode."
         (setq seance-review--reply reply
               seance-review--options (plist-get params :options)
               seance-review--session sess)))
-    (display-buffer buf '(display-buffer-in-side-window (side . right)))))
+    (display-buffer buf '(display-buffer-in-side-window (side . right)))
+    ;; A stale request replaced above stays "pending" from the consumer's
+    ;; view: the hook fires once per displayed request, and the pending
+    ;; handler must cope with being called while already pending.
+    (when seance-review-on-pending
+      (funcall seance-review-on-pending))))
 
 (defun seance-review--answer (&rest kinds)
   "Answer the pending permission request with the first option matching KINDS.
@@ -115,7 +127,9 @@ existence doubles as the \"request pending\" signal."
     (if-let* ((win (get-buffer-window buf)))
         (quit-window 'kill win)
       (kill-buffer buf))
-    (funcall reply (seance-review--outcome id))))
+    (funcall reply (seance-review--outcome id))
+    (when seance-review-on-answered
+      (funcall seance-review-on-answered))))
 
 (defun seance-review-allow ()
   "Allow this tool call once."

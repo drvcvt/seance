@@ -75,6 +75,22 @@
                    "opt-allow-always"))
     (should (eq (seance-acp-session-permission-mode sess) 'auto))))
 
+(ert-deftest seance-review-pending-and-answered-hooks-fire ()
+  "Gated show fires `seance-review-on-pending'; answering fires
+`seance-review-on-answered'."
+  (let* ((pending 0) (answered 0)
+         (seance-review-on-pending (lambda () (cl-incf pending)))
+         (seance-review-on-answered (lambda () (cl-incf answered))))
+    (seance-review-handle-permission
+     (seance-review-test--session 'gated) seance-review-test--params
+     #'ignore)
+    (should (= pending 1))
+    (should (= answered 0))
+    (with-current-buffer "*seance permission*"
+      (seance-review-allow))
+    (should (= pending 1))
+    (should (= answered 1))))
+
 (ert-deftest seance-review-end-to-end-against-mock ()
   "Full loop: mock requests permission, we allow, mock reports the pick."
   (let* ((seance-codex-acp-command (seance-test-mock-command "permission"))

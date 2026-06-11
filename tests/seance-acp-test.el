@@ -74,6 +74,41 @@
     (should-error (seance-acp-prompt sess "x") :type 'user-error)
     (should (eq (seance-acp-session-status sess) 'disconnected))))
 
+(ert-deftest seance-acp-slice-lines ()
+  "Line/limit slicing for fs/read_text_file."
+  (let ((content "one\ntwo\nthree\n"))
+    ;; neither param: identity
+    (should (equal (seance-acp--slice-lines content nil nil) content))
+    ;; both: lines [line-1, line-1+limit)
+    (should (equal (seance-acp--slice-lines content 2 1) "two"))
+    (should (equal (seance-acp--slice-lines content 1 2) "one\ntwo"))
+    ;; only line: from line-1 to end (trailing newline survives via the
+    ;; empty final split element)
+    (should (equal (seance-acp--slice-lines content 2 nil) "two\nthree\n"))
+    ;; only limit: first limit lines
+    (should (equal (seance-acp--slice-lines content nil 2) "one\ntwo"))
+    ;; limit reaching past EOF: whole rest
+    (should (equal (seance-acp--slice-lines content 3 10) "three\n"))
+    ;; line beyond EOF: empty string
+    (should (equal (seance-acp--slice-lines content 99 nil) ""))
+    (should (equal (seance-acp--slice-lines content 99 5) ""))))
+
+(ert-deftest seance-acp-connect-resets-edit-log ()
+  "Connecting a new session must clear the per-session edit log."
+  (require 'seance-review)
+  (let ((seance-review--edit-log
+         '((:path "/tmp/stale.el" :before "a\n" :after "b\n"))))
+    (seance-acp-test--with-session "echo" sess _updates
+      (should (null seance-review--edit-log)))))
+
+(ert-deftest seance-acp-cancel-on-dead-session-errors ()
+  "Cancelling a disconnected session signals `user-error', not a process error."
+  (let* ((seance-codex-acp-command (seance-test-mock-command "echo"))
+         (sess (seance-acp-connect temporary-file-directory)))
+    (seance-test-wait (lambda () (eq (seance-acp-session-status sess) 'idle)))
+    (seance-acp-disconnect sess)
+    (should-error (seance-acp-cancel sess) :type 'user-error)))
+
 (ert-deftest seance-acp-fs-read-error-still-ends-turn ()
   "A failed fs/read reply must not crash the agent; the turn still ends."
   (seance-acp-test--with-session "fs" sess updates

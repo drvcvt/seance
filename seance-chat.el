@@ -438,6 +438,57 @@ any error during fontification degrade to the plain unfontified text."
         (setq seance-chat--plan-start start
               seance-chat--plan-end (point-marker))))))
 
+;; --- waiting-for-permission marker -----------------------------------------
+
+;; seance-chat deliberately does not require seance-review (review requires
+;; acp; chat stays out of that cluster).  These `defvar's keep the
+;; byte-compiler quiet; the notifiers register once review is loaded below.
+(defvar seance-review-on-pending)
+(defvar seance-review-on-answered)
+(defvar seance-review-permission-buffer)
+
+(defvar-local seance-chat--permission-region nil
+  "Cons (START . END) of markers around the waiting-for-permission line.")
+
+(defun seance-chat--live-chat-buffer ()
+  "Return the live, initialized chat buffer, or nil."
+  (when-let* ((buf (get-buffer seance-chat-buffer-name)))
+    (and (buffer-live-p buf)
+         (buffer-local-value 'seance-chat--output-marker buf)
+         buf)))
+
+(defun seance-chat--permission-pending ()
+  "Show a waiting-for-permission line in the chat transcript.
+Replaces any marker still present from an overlapping earlier request."
+  (when-let* ((buf (seance-chat--live-chat-buffer)))
+    (with-current-buffer buf
+      (seance-chat--permission-answered)
+      (let ((start (copy-marker seance-chat--output-marker nil)))
+        (seance-chat--insert-output
+         (propertize
+          (format "⏸ waiting for permission (see %s)\n"
+                  seance-review-permission-buffer)
+          'face 'seance-thought-face))
+        (setq seance-chat--permission-region
+              (cons start (copy-marker seance-chat--output-marker nil)))))))
+
+(defun seance-chat--permission-answered ()
+  "Remove the waiting-for-permission line from the chat transcript."
+  (when-let* ((buf (seance-chat--live-chat-buffer)))
+    (with-current-buffer buf
+      (when seance-chat--permission-region
+        (let ((inhibit-read-only t)
+              (start (car seance-chat--permission-region))
+              (end (cdr seance-chat--permission-region)))
+          (delete-region start end)
+          (set-marker start nil)
+          (set-marker end nil))
+        (setq seance-chat--permission-region nil)))))
+
+(with-eval-after-load 'seance-review
+  (setq seance-review-on-pending #'seance-chat--permission-pending
+        seance-review-on-answered #'seance-chat--permission-answered))
+
 ;; --- bindings: one table drives the keymap AND the ? help ----------------
 
 (require 'seance-keys)

@@ -7,10 +7,14 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'seq)
 (require 'seance)
 (require 'seance-rpc)
 
 (declare-function seance-bridge-mcp-servers "seance-bridge")
+;; Defined in seance-review, which `seance-acp-connect' requires at runtime
+;; (seance-review requires seance-acp; a top-level require would cycle).
+(defvar seance-review--edit-log)
 
 (defvar seance-acp--fs-read-function nil
   "When set, (fn PATH) -> string; serves fs/read_text_file.  Set in Task 8.")
@@ -49,6 +53,9 @@ OPTS: :on-update :on-status :on-ready (each optional)."
   ;; Registers the permission handler; required lazily here because
   ;; seance-review requires seance-acp (load cycle at top level).
   (require 'seance-review)
+  ;; The edit log is per session; a stale log from an earlier session
+  ;; would leak into this session's review buffer.
+  (setq seance-review--edit-log nil)
   ;; Default MCP-server hook: expose the emacs_* live-eval bridge.
   ;; `seance-bridge-mcp-servers' itself decides whether to offer anything
   ;; (defcustom gate; never auto-starts a server in noninteractive Emacs).
@@ -115,7 +122,10 @@ Signal a `user-error' if SESS's adapter subprocess is not running."
      (when callback (funcall callback result error)))))
 
 (defun seance-acp-cancel (sess)
-  "Cancel SESS's in-flight turn."
+  "Cancel SESS's in-flight turn.
+Signal a `user-error' if SESS's adapter subprocess is not running."
+  (unless (seance-rpc-alive-p (seance-acp-session-rpc sess))
+    (user-error "seance: not connected"))
   (seance-rpc-notify (seance-acp-session-rpc sess) "session/cancel"
                      `(:sessionId ,(seance-acp-session-id sess))))
 
@@ -150,11 +160,16 @@ Signal a `user-error' if SESS's adapter subprocess is not running."
                                                   :optionId))))))
     ("fs/read_text_file"
      (condition-case err
-         (funcall reply `(:content ,(funcall (or seance-acp--fs-read-function
-                                                 #'seance-acp--read-file-fallback)
-                                             (expand-file-name
-                                              (plist-get params :path)
-                                              (seance-acp-session-cwd sess)))))
+         (funcall reply
+                  `(:content
+                    ,(seance-acp--slice-lines
+                      (funcall (or seance-acp--fs-read-function
+                                   #'seance-acp--read-file-fallback)
+                               (expand-file-name
+                                (plist-get params :path)
+                                (seance-acp-session-cwd sess)))
+                      (plist-get params :line)
+                      (plist-get params :limit))))
        (error (funcall reply nil `(:code -32603
                                    :message ,(error-message-string err))))))
     ("fs/write_text_file"
@@ -171,6 +186,19 @@ Signal a `user-error' if SESS's adapter subprocess is not running."
                                    :message ,(error-message-string err))))))
     (_ (funcall reply nil `(:code -32601
                             :message ,(format "Method not found: %s" method))))))
+
+(defun seance-acp--slice-lines (content line limit)
+  "Return CONTENT restricted to LIMIT lines starting at 1-based LINE.
+ACP's fs/read_text_file range semantics: nil LINE starts at the first
+line, nil LIMIT runs to the end, both nil returns CONTENT unchanged.
+CONTENT is split on newlines; a slice that reaches the end of CONTENT
+keeps its trailing newline (the empty final split element), interior
+slices carry no trailing newline."
+  (if (and (null line) (null limit))
+      content
+    (let* ((lines (split-string content "\n"))
+           (rest (nthcdr (max 0 (1- (or line 1))) lines)))
+      (string-join (if limit (seq-take rest limit) rest) "\n"))))
 
 (defun seance-acp--read-file-fallback (path)
   "Return the contents of PATH as a string."

@@ -168,4 +168,28 @@ so the test exercises the erroring-mode path, not the unknown-lang one."
       (should ov)
       (should-not (overlay-get ov 'invisible)))))
 
+(defconst seance-chat-test--permission-params
+  '(:sessionId "s1"
+    :toolCall (:toolCallId "tc-c1" :title "edit guarded.el" :kind "edit"
+               :content [(:type "diff" :path "guarded.el"
+                          :oldText "before\n" :newText "after\n")])
+    :options [(:optionId "opt-allow" :name "Allow" :kind "allow_once")
+              (:optionId "opt-reject" :name "Reject" :kind "reject_once")])
+  "session/request_permission params for the chat marker test.")
+
+(ert-deftest seance-chat-permission-marker-appears-and-clears ()
+  "A gated permission request shows a waiting marker in the chat
+transcript; answering it removes the marker again."
+  (require 'seance-review)
+  (seance-chat-test--with-buffer "echo"
+    (let ((answer nil))
+      (seance-review-handle-permission
+       seance-chat--session seance-chat-test--permission-params
+       (lambda (result &optional _err) (setq answer result)))
+      (should (string-match-p "waiting for permission" (buffer-string)))
+      (with-current-buffer "*seance permission*"
+        (seance-review-allow))
+      (should answer)
+      (should-not (string-match-p "waiting for permission" (buffer-string))))))
+
 ;;; seance-chat-test.el ends here
