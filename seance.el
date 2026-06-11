@@ -43,5 +43,54 @@ collects edits for later review."
       (project-root proj)
     default-directory))
 
+;; Entry commands.  seance-chat/seance-acp are required lazily inside the
+;; commands: a top-level require would be circular (seance-chat ->
+;; seance-acp -> seance).  Declarations below keep byte-compilation clean.
+
+(declare-function seance-chat-mode "seance-chat" ())
+(declare-function seance-chat--initialize "seance-chat" ())
+(declare-function seance-acp-disconnect "seance-acp" (sess))
+(declare-function seance-acp-toggle-permission-mode "seance-acp" (sess))
+(declare-function seance-acp-session-rpc "seance-acp" (cl-x))
+(declare-function seance-rpc-alive-p "seance-rpc" (conn))
+(defvar seance-chat-buffer-name)
+(defvar seance-chat--session)
+(defvar seance-acp--session)
+
+;;;###autoload
+(defun seance ()
+  "Open the seance chat buffer, connecting a session if needed."
+  (interactive)
+  (require 'seance-chat)
+  (let ((buf (get-buffer-create seance-chat-buffer-name)))
+    (with-current-buffer buf
+      (unless (derived-mode-p 'seance-chat-mode)
+        (seance-chat-mode))
+      (unless (and seance-chat--session
+                   (seance-rpc-alive-p
+                    (seance-acp-session-rpc seance-chat--session)))
+        (seance-chat--initialize)))
+    (pop-to-buffer buf)))
+
+(defun seance-stop ()
+  "Disconnect the current seance session."
+  (interactive)
+  (require 'seance-chat)
+  (when-let* ((buf (get-buffer seance-chat-buffer-name)))
+    (with-current-buffer buf
+      (when seance-chat--session
+        (seance-acp-disconnect seance-chat--session)))))
+
+(defun seance-toggle-permission-mode ()
+  "Toggle the current session between gated and auto permission mode."
+  (interactive)
+  (require 'seance-acp)
+  (if-let* ((sess seance-acp--session))
+      (progn
+        (message "seance: permission mode is now %s"
+                 (seance-acp-toggle-permission-mode sess))
+        (force-mode-line-update t))
+    (user-error "No active seance session")))
+
 (provide 'seance)
 ;;; seance.el ends here

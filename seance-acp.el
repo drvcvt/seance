@@ -108,6 +108,12 @@ Signal a `user-error' if SESS's adapter subprocess is not running."
   (seance-rpc-notify (seance-acp-session-rpc sess) "session/cancel"
                      `(:sessionId ,(seance-acp-session-id sess))))
 
+(defun seance-acp-toggle-permission-mode (sess)
+  "Toggle SESS between gated and auto permission mode; return the new mode."
+  (setf (seance-acp-session-permission-mode sess)
+        (if (eq (seance-acp-session-permission-mode sess) 'gated)
+            'auto 'gated)))
+
 (defun seance-acp-disconnect (sess)
   "Shut down SESS's adapter subprocess and mark it disconnected."
   (seance-rpc-shutdown (seance-acp-session-rpc sess))
