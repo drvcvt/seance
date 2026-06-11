@@ -23,4 +23,10 @@
       (should (stringp (nth 2 b)))
       (should (fboundp (nth 1 b))))))
 
+(ert-deftest seance-keys-no-duplicate-keys ()
+  (let ((keys (mapcan (lambda (group)
+                        (mapcar #'car (cdr group)))
+                      seance-keys-chat-table)))
+    (should (equal keys (delete-dups (copy-sequence keys))))))
+
 ;;; seance-keys-test.el ends here

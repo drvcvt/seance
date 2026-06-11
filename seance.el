@@ -99,13 +99,18 @@ collects edits for later review."
 ;; suffix commands when the `?' help menu opens (transient--init-suffix
 ;; calls `autoload-do-load'), which would signal file-missing until
 ;; seance-review.el exists (Task 9).  This trampoline keeps the menu
-;; openable now; loading seance-review.el replaces it with the real
-;; command, after which the recursive call below dispatches to it.
+;; openable now; loading seance-review.el must redefine this command, after
+;; which the call below dispatches to the real implementation.  If the
+;; feature loads but the command is not redefined, we signal an error rather
+;; than infinite-looping.
 (defun seance-review ()
   "Open the seance session review buffer."
   (interactive)
-  (require 'seance-review)
-  (seance-review))
+  (let ((before (symbol-function 'seance-review)))
+    (require 'seance-review)
+    (if (eq (symbol-function 'seance-review) before)
+        (error "seance-review.el did not redefine `seance-review'")
+      (seance-review))))
 
 (provide 'seance)
 ;;; seance.el ends here
