@@ -244,9 +244,16 @@ streamed body is hidden by an invisible overlay (TAB toggles it)."
                     (marker-position seance-chat--output-marker)))))
 
 (defun seance-chat--thought-overlay-at (pos)
-  "Return the thought-hiding overlay at or shortly after POS, if any."
-  (seq-find (lambda (ov) (overlay-get ov 'seance-thought))
-            (overlays-in pos (min (point-max) (+ pos 2000)))))
+  "Return the thought-hiding overlay at or shortly after POS, if any.
+Among several candidates the one starting earliest wins; the order of
+`overlays-in' is unspecified before Emacs 29."
+  (let (best)
+    (dolist (ov (overlays-in pos (min (point-max) (+ pos 2000))))
+      (when (and (overlay-get ov 'seance-thought)
+                 (or (null best)
+                     (< (overlay-start ov) (overlay-start best))))
+        (setq best ov)))
+    best))
 
 (defun seance-chat-toggle-thought ()
   "Toggle the thought block at point; fall back to tool-call details."
@@ -273,28 +280,48 @@ streamed body is hidden by an invisible overlay (TAB toggles it)."
              body-start (match-beginning 0) lang)
             (goto-char close-end)))))))
 
+(defcustom seance-chat-fence-modes
+  '(("elisp" . emacs-lisp-mode) ("emacs-lisp" . emacs-lisp-mode)
+    ("lisp" . emacs-lisp-mode)
+    ("c" . c-mode) ("h" . c-mode)
+    ("py" . python-mode) ("python" . python-mode)
+    ("sh" . sh-mode) ("bash" . sh-mode) ("shell" . sh-mode)
+    ("js" . js-mode) ("javascript" . js-mode)
+    ("json" . js-json-mode)
+    ("rust" . rust-mode) ("rs" . rust-mode))
+  "Alist mapping markdown fence language strings to major mode symbols.
+The fence language comes from the agent, so fontification never derives
+a function name from it: only modes listed here are ever called.
+Unknown languages render as plain text.  Entries whose mode symbol is
+not bound (e.g. an uninstalled `rust-mode') are ignored.  Extend this
+alist to fontify additional languages."
+  :type '(alist :key-type string :value-type symbol)
+  :group 'seance)
+
 (defun seance-chat--fontify-region-as (start end lang)
-  "Apply LANG mode font-lock faces to the region START..END."
+  "Apply LANG mode font-lock faces to the region START..END.
+LANG is looked up in `seance-chat-fence-modes'; unknown languages and
+any error during fontification degrade to the plain unfontified text."
   (let* ((text (buffer-substring-no-properties start end))
-         (mode (intern-soft (concat (if (member lang '("elisp" "emacs-lisp" "lisp"))
-                                        "emacs-lisp" lang)
-                                    "-mode")))
+         (mode (cdr (assoc lang seance-chat-fence-modes)))
          (fontified
           (if (and mode (fboundp mode))
-              (with-temp-buffer
-                (insert text)
-                (delay-mode-hooks (funcall mode))
-                (font-lock-ensure)
-                ;; normalize font-lock-face → face so it renders without font-lock
-                (let ((pos (point-min)))
-                  (while (< pos (point-max))
-                    (let ((f (or (get-text-property pos 'face)
-                                 (get-text-property pos 'font-lock-face)))
-                          (next (or (next-single-property-change pos 'face)
-                                    (point-max))))
-                      (when f (put-text-property pos next 'face f))
-                      (setq pos next))))
-                (buffer-string))
+              (condition-case nil
+                  (with-temp-buffer
+                    (insert text)
+                    (delay-mode-hooks (funcall mode))
+                    (font-lock-ensure)
+                    ;; normalize font-lock-face → face so it renders without font-lock
+                    (let ((pos (point-min)))
+                      (while (< pos (point-max))
+                        (let ((f (or (get-text-property pos 'face)
+                                     (get-text-property pos 'font-lock-face)))
+                              (next (or (next-single-property-change pos 'face)
+                                        (point-max))))
+                          (when f (put-text-property pos next 'face f))
+                          (setq pos next))))
+                    (buffer-string))
+                (error text))
             text)))
     (delete-region start end)
     (goto-char start)

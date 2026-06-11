@@ -126,6 +126,25 @@ Adapted for Task 13: thought blocks now carry a ▸ Thinking… header line."
     (backward-word)
     (should (eq (get-text-property (point) 'face) 'font-lock-keyword-face))))
 
+(ert-deftest seance-chat-erroring-fence-mode-degrades-to-plain ()
+  "A fence lang whose mode signals (image-mode in batch) must not
+brick rendering: the close completes, the body text survives, and
+later blocks still get their separators.  The lang is mapped explicitly
+so the test exercises the erroring-mode path, not the unknown-lang one."
+  (seance-chat-test--with-buffer "echo"
+    (setq-local seance-chat-fence-modes
+                (cons '("image" . image-mode) seance-chat-fence-modes))
+    (seance-chat--stream-chunk 'message "look:\n```image\nnot an image\n")
+    (seance-chat--stream-chunk 'message "```\ntail")
+    (seance-chat--close-block)
+    ;; block state was reset, body text is still there
+    (should (null seance-chat--block))
+    (should (string-match-p "not an image" (buffer-string)))
+    ;; a subsequent stream/close cycle still renders separators
+    (seance-chat--stream-chunk 'message "after")
+    (seance-chat--close-block)
+    (should (string-match-p "tail\n\nafter\n\n" (buffer-string)))))
+
 (ert-deftest seance-chat-thought-block-collapsed-by-default ()
   (seance-chat-test--with-buffer "echo"
     (seance-chat--stream-chunk 'thought "secret reasoning")
