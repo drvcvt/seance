@@ -97,4 +97,79 @@
                    updates)))
       (seance-acp-disconnect sess))))
 
+(ert-deftest seance-review-fs-read-prefers-buffer ()
+  (let ((file (make-temp-file "seance-fs" nil ".txt" "disk content\n")))
+    (unwind-protect
+        (with-current-buffer (find-file-noselect file)
+          (goto-char (point-min))
+          (insert "unsaved ")
+          (should (equal (seance-review-read-file file)
+                         "unsaved disk content\n"))
+          (set-buffer-modified-p nil)
+          (kill-buffer))
+      (delete-file file))))
+
+(ert-deftest seance-review-fs-write-into-clean-buffer-saves ()
+  (let ((file (make-temp-file "seance-fs" nil ".txt" "old\n")))
+    (unwind-protect
+        (let ((buf (find-file-noselect file)))
+          (seance-review-write-file file "new\n")
+          (with-current-buffer buf
+            (should (equal (buffer-string) "new\n"))
+            (should-not (buffer-modified-p)))   ; was clean -> saved
+          (should (equal (with-temp-buffer (insert-file-contents file)
+                                           (buffer-string))
+                         "new\n"))
+          (kill-buffer buf))
+      (delete-file file))))
+
+(ert-deftest seance-review-fs-write-into-dirty-buffer-stays-unsaved ()
+  (let ((file (make-temp-file "seance-fs" nil ".txt" "old\n")))
+    (unwind-protect
+        (let ((buf (find-file-noselect file)))
+          (with-current-buffer buf (insert "dirty "))
+          (seance-review-write-file file "new\n")
+          (with-current-buffer buf
+            (should (equal (buffer-string) "new\n"))
+            (should (buffer-modified-p)))       ; had user edits -> not saved
+          ;; disk still has the old content
+          (should (equal (with-temp-buffer (insert-file-contents file)
+                                           (buffer-string))
+                         "old\n"))
+          (with-current-buffer buf (set-buffer-modified-p nil) (kill-buffer)))
+      (delete-file file))))
+
+(ert-deftest seance-review-edit-log-records-before-after ()
+  (let ((file (make-temp-file "seance-fs" nil ".txt" "v1\n"))
+        (seance-review--edit-log nil))
+    (unwind-protect
+        (progn
+          (seance-review-write-file file "v2\n")
+          (let ((e (car seance-review--edit-log)))
+            (should (equal (plist-get e :before) "v1\n"))
+            (should (equal (plist-get e :after) "v2\n"))
+            (should (equal (plist-get e :path) file))))
+      (delete-file file))))
+
+(ert-deftest seance-review-fs-end-to-end-against-mock ()
+  "Mock reads a file through us, writes it back uppercased."
+  (let* ((file (make-temp-file "seance-fs" nil ".txt" "hello\n"))
+         (seance-review--edit-log nil)
+         (seance-codex-acp-command (seance-test-mock-command "fs"))
+         (updates nil)
+         (sess (seance-acp-connect temporary-file-directory
+                                   :on-update (lambda (u) (push u updates)))))
+    (unwind-protect
+        (progn
+          (seance-test-wait (lambda () (eq (seance-acp-session-status sess) 'idle)))
+          (let ((done nil))
+            (seance-acp-prompt sess file (lambda (_r _e) (setq done t)))
+            (seance-test-wait (lambda () done)))
+          (should (equal (with-temp-buffer (insert-file-contents file)
+                                           (buffer-string))
+                         "HELLO\n"))
+          (should (= (length seance-review--edit-log) 1)))
+      (seance-acp-disconnect sess)
+      (delete-file file))))
+
 ;;; seance-review-test.el ends here

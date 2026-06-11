@@ -1,4 +1,4 @@
-;;; mock-agent.el --- scripted ACP agent for seance tests
+;;; mock-agent.el --- scripted ACP agent for seance tests -*- lexical-binding: t; -*-
 ;; Plays the agent side of ACP over stdio (ndjson). Scenario comes from
 ;; the SEANCE_MOCK_SCENARIO env var:
 ;; echo | tools | permission | fs | init-error.

@@ -140,5 +140,42 @@ existence doubles as the \"request pending\" signal."
 ;; Register as the ACP permission handler.
 (setq seance-acp--permission-function #'seance-review-handle-permission)
 
+;; --- buffer-aware fs + edit log -------------------------------------------
+
+(defvar seance-review--edit-log nil
+  "List of edits, newest first: plists (:path :before :after).")
+
+(defun seance-review-read-file (path)
+  "Content of PATH as the agent should see it: live buffer over disk."
+  (if-let* ((buf (find-buffer-visiting path)))
+      (with-current-buffer buf
+        (buffer-substring-no-properties (point-min) (point-max)))
+    (with-temp-buffer
+      (insert-file-contents path)
+      (buffer-string))))
+
+(defun seance-review-write-file (path content)
+  "Write CONTENT to PATH through Emacs, recording the edit.
+If a buffer visits PATH: replace its content; save only when the buffer
+had no unsaved user changes.  Otherwise write straight to disk."
+  (let ((before (if (or (find-buffer-visiting path) (file-exists-p path))
+                    (seance-review-read-file path)
+                  "")))
+    (push (list :path path :before before :after content)
+          seance-review--edit-log)
+    (if-let* ((buf (find-buffer-visiting path)))
+        (with-current-buffer buf
+          (let ((was-clean (not (buffer-modified-p))))
+            (let ((inhibit-read-only t))
+              (erase-buffer)
+              (insert content))
+            (when was-clean (save-buffer))))
+      (let ((dir (file-name-directory (expand-file-name path))))
+        (make-directory dir t))
+      (write-region content nil path nil 'silent))))
+
+(setq seance-acp--fs-read-function #'seance-review-read-file)
+(setq seance-acp--fs-write-function #'seance-review-write-file)
+
 (provide 'seance-review)
 ;;; seance-review.el ends here
