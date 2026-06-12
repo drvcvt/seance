@@ -15,6 +15,7 @@
 ;; Defined in seance-review, which `seance-acp-connect' requires at runtime
 ;; (seance-review requires seance-acp; a top-level require would cycle).
 (defvar seance-review--edit-log)
+(defvar seance-review-permission-buffer)
 
 (defvar seance-acp--fs-read-function nil
   "When set, (fn PATH) -> string; serves fs/read_text_file.  Set in Task 8.")
@@ -56,6 +57,11 @@ OPTS: :on-update :on-status :on-ready (each optional)."
   ;; The edit log is per session; a stale log from an earlier session
   ;; would leak into this session's review buffer.
   (setq seance-review--edit-log nil)
+  ;; A lingering permission buffer holds a reply parked for a predecessor
+  ;; session; killing it consumes that stale state before it can collide
+  ;; with this session's first permission request.
+  (when-let* ((buf (get-buffer seance-review-permission-buffer)))
+    (kill-buffer buf))
   ;; Default MCP-server hook: expose the emacs_* live-eval bridge.
   ;; `seance-bridge-mcp-servers' itself decides whether to offer anything
   ;; (defcustom gate; never auto-starts a server in noninteractive Emacs).

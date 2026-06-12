@@ -54,25 +54,42 @@ CALLBACK is called as (RESULT ERROR) when the response arrives."
     (cond
      ((and method id)                   ; incoming request
       (let ((replied nil))
-        (condition-case err
-            (funcall (seance-rpc-handler rpc) method (plist-get msg :params)
-                     (lambda (result &optional error)
-                       (unless replied
-                         (setq replied t)
-                         (seance-rpc--send
-                          rpc (if error
-                                  `(:jsonrpc "2.0" :id ,id :error ,error)
-                                `(:jsonrpc "2.0" :id ,id
-                                  :result ,(or result :null)))))))
-          (error
-           (message "seance-rpc: handler error on %s: %s"
-                    method (error-message-string err))
-           (unless replied
-             (setq replied t)
-             (seance-rpc--send
-              rpc `(:jsonrpc "2.0" :id ,id
-                    :error (:code -32603
-                            :message ,(error-message-string err)))))))))
+        ;; Replies can be parked (e.g. awaiting the user) and outlive the
+        ;; connection.  Sending one into a dead transport must be a no-op,
+        ;; never a signal: the error would escape into whatever code later
+        ;; consumes the parked reply -- in production, the dispatch of a
+        ;; NEW session's request, poisoning that session's answer.
+        (cl-flet ((send-reply (reply-msg)
+                    (let ((proc (seance-rpc-process rpc)))
+                      (if (and proc (not (process-live-p proc)))
+                          (message "seance-rpc: dropping reply to dead connection (%s)"
+                                   method)
+                        ;; The process can still die between the liveness
+                        ;; check and the send; drop in that case too.
+                        (condition-case err
+                            (seance-rpc--send rpc reply-msg)
+                          (error
+                           (message "seance-rpc: dropping reply to dead connection (%s): %s"
+                                    method (error-message-string err))))))))
+          (condition-case err
+              (funcall (seance-rpc-handler rpc) method (plist-get msg :params)
+                       (lambda (result &optional error)
+                         (unless replied
+                           (setq replied t)
+                           (send-reply
+                            (if error
+                                `(:jsonrpc "2.0" :id ,id :error ,error)
+                              `(:jsonrpc "2.0" :id ,id
+                                :result ,(or result :null)))))))
+            (error
+             (message "seance-rpc: handler error on %s: %s"
+                      method (error-message-string err))
+             (unless replied
+               (setq replied t)
+               (send-reply
+                `(:jsonrpc "2.0" :id ,id
+                  :error (:code -32603
+                          :message ,(error-message-string err))))))))))
      (method                            ; notification
       (funcall (seance-rpc-notifier rpc) method (plist-get msg :params)))
      (id                                ; response to our request

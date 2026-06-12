@@ -89,11 +89,16 @@ its permission mode."
     (with-current-buffer buf
       ;; An unanswered earlier request would be orphaned by the rebuild
       ;; below (diff-mode wipes the buffer-locals holding its reply), so
-      ;; answer it with the protocol's cancelled outcome first.
+      ;; answer it with the protocol's cancelled outcome first.  Showing
+      ;; the NEW request must never fail because this cleanup did: the
+      ;; stale reply may belong to a dead predecessor session.
       (when seance-review--reply
         (let ((stale seance-review--reply))
           (setq seance-review--reply nil)
-          (funcall stale '(:outcome (:outcome "cancelled")))))
+          (condition-case err
+              (funcall stale '(:outcome (:outcome "cancelled")))
+            (error (message "seance: dropped stale permission reply: %s"
+                            (error-message-string err))))))
       (let ((inhibit-read-only t))
         (erase-buffer)
         (insert (seance-review--permission-text (plist-get params :toolCall)))

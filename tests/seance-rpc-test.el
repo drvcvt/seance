@@ -84,6 +84,27 @@
           (should (zerop (hash-table-count (seance-rpc-pending rpc)))))
       (seance-rpc-shutdown rpc))))
 
+(ert-deftest seance-rpc-parked-reply-to-dead-process-is-noop ()
+  "Funcalling a parked reply closure after the process died must not signal.
+Production chain: a permission reply parked in UI outlives its session;
+the adapter is SIGKILLed; the stale reply is later consumed as cleanup.
+That send must be dropped, not raise a process error."
+  (let* ((stashed nil)
+         (rpc (seance-rpc-start
+               (list seance-test-emacs "--batch" "--script"
+                     (expand-file-name "rpc-echo.el" seance-test-dir))
+               :handler (lambda (_method _params reply) (setq stashed reply)))))
+    (unwind-protect
+        (progn
+          (seance-rpc--filter rpc "{\"jsonrpc\":\"2.0\",\"id\":11,\"method\":\"x\"}\n")
+          (should stashed)
+          (kill-process (seance-rpc-process rpc))
+          (seance-test-wait
+           (lambda () (not (process-live-p (seance-rpc-process rpc)))))
+          ;; Must return without sending; a signal here fails the test.
+          (funcall stashed '(:ok t)))
+      (seance-rpc-shutdown rpc))))
+
 (ert-deftest seance-rpc-stderr-buffer-per-connection ()
   "Each connection gets its own stderr buffer named from :name."
   (let ((rpc (seance-rpc-start

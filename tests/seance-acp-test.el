@@ -101,6 +101,17 @@
     (seance-acp-test--with-session "echo" sess _updates
       (should (null seance-review--edit-log)))))
 
+(ert-deftest seance-acp-connect-kills-stale-permission-buffer ()
+  "Connecting a new session must kill a predecessor's permission buffer.
+A lingering buffer holds a parked reply belonging to the old session."
+  (require 'seance-review)
+  (get-buffer-create seance-review-permission-buffer)
+  (unwind-protect
+      (seance-acp-test--with-session "echo" sess _updates
+        (should-not (get-buffer seance-review-permission-buffer)))
+    (when (get-buffer seance-review-permission-buffer)
+      (kill-buffer seance-review-permission-buffer))))
+
 (ert-deftest seance-acp-cancel-on-dead-session-errors ()
   "Cancelling a disconnected session signals `user-error', not a process error."
   (let* ((seance-codex-acp-command (seance-test-mock-command "echo"))

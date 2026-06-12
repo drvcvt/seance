@@ -63,6 +63,53 @@
     (should (equal (plist-get (plist-get second :outcome) :optionId)
                    "opt-allow"))))
 
+(ert-deftest seance-review-stale-reply-from-dead-session-does-not-poison-next ()
+  "Regression: a parked reply whose adapter died must not break the next session.
+Session A's permission request arrives through the real rpc layer and
+parks its reply in the permission buffer; A's adapter process is killed;
+session B's request then triggers the stale-reply cleanup in
+`seance-review--show-permission'.  That cleanup must not signal: B's
+request must reach the pending state and stay answerable."
+  (let* ((sess-a nil)
+         (rpc-a (seance-rpc-start
+                 (list seance-test-emacs "--batch" "--script"
+                       (expand-file-name "rpc-echo.el" seance-test-dir))
+                 :handler (lambda (method params reply)
+                            ;; Wired like seance-acp--client-request.
+                            (when (equal method "session/request_permission")
+                              (seance-review-handle-permission sess-a params reply)))))
+         (b-answer nil))
+    (setq sess-a (seance-acp-session--make
+                  :permission-mode 'gated :id "sA" :rpc rpc-a))
+    (unwind-protect
+        (progn
+          ;; A's request arrives over the real transport and parks.
+          (seance-rpc--filter
+           rpc-a
+           (concat (json-serialize
+                    (list :jsonrpc "2.0" :id 1
+                          :method "session/request_permission"
+                          :params seance-review-test--params))
+                   "\n"))
+          (should (get-buffer "*seance permission*"))
+          ;; A's adapter dies (production: SIGKILL).
+          (kill-process (seance-rpc-process rpc-a))
+          (seance-test-wait
+           (lambda () (not (process-live-p (seance-rpc-process rpc-a)))))
+          ;; B's request must not blow up on A's stale parked reply.
+          (seance-review-handle-permission
+           (seance-review-test--session 'gated) seance-review-test--params
+           (lambda (result &optional _err) (setq b-answer result)))
+          (should (null b-answer))              ; B is pending, unanswered
+          (should (get-buffer "*seance permission*"))
+          (with-current-buffer "*seance permission*"
+            (seance-review-allow))
+          (should (equal (plist-get (plist-get b-answer :outcome) :optionId)
+                         "opt-allow")))
+      (seance-rpc-shutdown rpc-a)
+      (when (get-buffer "*seance permission*")
+        (kill-buffer "*seance permission*")))))
+
 (ert-deftest seance-review-allow-all-switches-session-to-auto ()
   (let ((answer nil)
         (sess (seance-review-test--session 'gated)))
