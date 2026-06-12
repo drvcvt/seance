@@ -48,28 +48,37 @@ collects edits for later review."
 ;; seance-acp -> seance).  Declarations below keep byte-compilation clean.
 
 (declare-function seance-chat-mode "seance-chat" ())
-(declare-function seance-chat--initialize "seance-chat" ())
+(declare-function seance-chat--initialize "seance-chat" (&optional mode))
 (declare-function seance-acp-disconnect "seance-acp" (sess))
 (declare-function seance-acp-toggle-permission-mode "seance-acp" (sess))
 (declare-function seance-acp-session-rpc "seance-acp" (cl-x))
+(declare-function seance-acp-session-permission-mode "seance-acp" (cl-x))
 (declare-function seance-rpc-alive-p "seance-rpc" (conn))
 (defvar seance-chat-buffer-name)
 (defvar seance-chat--session)
 (defvar seance-acp--session)
 
 ;;;###autoload
-(defun seance ()
-  "Open the seance chat buffer, connecting a session if needed."
-  (interactive)
+(defun seance (&optional yolo)
+  "Open the seance chat buffer, connecting a session if needed.
+With prefix argument YOLO (\\[universal-argument]), start the session in
+auto permission mode; an already running session is switched to auto."
+  (interactive "P")
   (require 'seance-chat)
   (let ((buf (get-buffer-create seance-chat-buffer-name)))
     (with-current-buffer buf
       (unless (derived-mode-p 'seance-chat-mode)
         (seance-chat-mode))
-      (unless (and seance-chat--session
-                   (seance-rpc-alive-p
-                    (seance-acp-session-rpc seance-chat--session)))
-        (seance-chat--initialize)))
+      (if (and seance-chat--session
+               (seance-rpc-alive-p
+                (seance-acp-session-rpc seance-chat--session)))
+          (when (and yolo
+                     (not (eq (seance-acp-session-permission-mode
+                               seance-chat--session)
+                              'auto)))
+            (seance-acp-toggle-permission-mode seance-chat--session)
+            (force-mode-line-update t))
+        (seance-chat--initialize (and yolo 'auto))))
     (pop-to-buffer buf)))
 
 (defun seance-stop ()

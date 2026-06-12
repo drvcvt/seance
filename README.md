@@ -66,10 +66,13 @@ or with use-package:
 `M-x seance` opens the chat buffer and connects a session rooted at the
 current project (see `seance-cwd-function`). The header line shows the
 session status, the permission mode, and the working directory.
+`C-u M-x seance` (Doom: `C-u SPC o x`) starts the session in auto
+permission mode — or switches an already running session to auto.
 
 Commands:
 
 - `seance` — open the chat buffer, connecting a session if needed
+  (with prefix argument: in auto permission mode)
 - `seance-stop` — disconnect the session
 - `seance-toggle-permission-mode` — flip gated/auto for the active session
 - `seance-review` — open the session review buffer
@@ -83,6 +86,8 @@ Chat buffer keys:
 | `M-p` / `M-n` | Cycle input history |
 | `TAB` | Fold/unfold the thought block or tool-call detail at point |
 | `C-c C-k` | Cancel the in-flight turn |
+| `C-c C-c` | Allow the pending tool call (without leaving the chat) |
+| `C-c C-d` | Deny the pending tool call |
 | `C-c C-p` | Toggle gated/auto permission mode |
 | `C-c C-r` | Open the session review buffer |
 | `C-c C-q` | Stop the session |
@@ -95,8 +100,10 @@ is generated from the same tables that build the keymaps, so it cannot drift.
 Permission modes:
 
 - `gated` (default): every agent tool call that needs permission opens a
-  diff side window. Press `a` to allow once, `d` to deny, `A` to allow
-  everything for the rest of the session (switches the session to auto).
+  diff side window. Answer straight from the chat buffer with `C-c C-c`
+  (allow) / `C-c C-d` (deny), or in the diff window with `a` to allow
+  once, `d` to deny, `A` to allow everything for the rest of the session
+  (switches the session to auto).
 - `auto`: tool calls are allowed silently; edits are still recorded for
   review.
 

@@ -75,8 +75,10 @@
             (abbreviate-file-name (or (and sess (seance-acp-session-cwd sess))
                                       default-directory)))))
 
-(defun seance-chat--initialize ()
-  "Insert the initial prompt and connect a session for this buffer."
+(defun seance-chat--initialize (&optional mode)
+  "Insert the initial prompt and connect a session for this buffer.
+When MODE is non-nil, set the new session's permission mode to it
+right after connecting (e.g. `auto' for a yolo session)."
   (let ((inhibit-read-only t)
         (buf (current-buffer)))
     (erase-buffer)
@@ -94,7 +96,9 @@
                           (with-current-buffer buf (seance-chat--on-update u))))
            :on-status (lambda (_s)
                         (when (buffer-live-p buf)
-                          (with-current-buffer buf (force-mode-line-update))))))))
+                          (with-current-buffer buf (force-mode-line-update))))))
+    (when mode
+      (setf (seance-acp-session-permission-mode seance-chat--session) mode))))
 
 (defun seance-chat--insert-output (string)
   "Insert STRING into the transcript, above the input prompt."
@@ -466,8 +470,8 @@ Replaces any marker still present from an overlapping earlier request."
       (let ((start (copy-marker seance-chat--output-marker nil)))
         (seance-chat--insert-output
          (propertize
-          (format "⏸ waiting for permission (see %s)\n"
-                  seance-review-permission-buffer)
+          (concat "⏸ waiting for permission — C-c C-c allow · C-c C-d deny"
+                  " (or a/d/A in the diff window)\n")
           'face 'seance-thought-face))
         (setq seance-chat--permission-region
               (cons start (copy-marker seance-chat--output-marker nil)))))))
@@ -489,6 +493,33 @@ Replaces any marker still present from an overlapping earlier request."
   (setq seance-review-on-pending #'seance-chat--permission-pending
         seance-review-on-answered #'seance-chat--permission-answered))
 
+;; Chat-side answer commands.  They run the review commands inside the
+;; permission buffer, so the user never has to leave the chat window.
+;; seance-review is necessarily loaded whenever a request is pending (the
+;; permission buffer exists only then), hence the guarded declarations.
+(declare-function seance-review-allow "seance-review" ())
+(declare-function seance-review-deny "seance-review" ())
+
+(defun seance-chat--permission-buffer ()
+  "Return the buffer holding the pending permission request, or signal.
+The buffer exists exactly while a request is pending; when seance-review
+was never loaded there cannot be one."
+  (or (and (boundp 'seance-review-permission-buffer)
+           (get-buffer seance-review-permission-buffer))
+      (user-error "seance: no pending permission request")))
+
+(defun seance-chat-approve ()
+  "Allow the pending tool call without leaving the chat buffer."
+  (interactive)
+  (with-current-buffer (seance-chat--permission-buffer)
+    (seance-review-allow)))
+
+(defun seance-chat-deny ()
+  "Deny the pending tool call without leaving the chat buffer."
+  (interactive)
+  (with-current-buffer (seance-chat--permission-buffer)
+    (seance-review-deny)))
+
 ;; --- bindings: one table drives the keymap AND the ? help ----------------
 
 (require 'seance-keys)
@@ -502,6 +533,9 @@ Replaces any marker still present from an overlapping earlier request."
     (conversation
      ("TAB" seance-chat-toggle-thought "Toggle thought/tool detail at point")
      ("C-c C-k" seance-chat-cancel "Cancel current turn"))
+    (permission
+     ("C-c C-c" seance-chat-approve "Allow pending tool call")
+     ("C-c C-d" seance-chat-deny "Deny pending tool call"))
     (session
      ("C-c C-p" seance-toggle-permission-mode "Toggle gated/auto")
      ("C-c C-r" seance-review "Open session review")

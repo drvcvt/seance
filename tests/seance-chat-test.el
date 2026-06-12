@@ -187,9 +187,68 @@ transcript; answering it removes the marker again."
        seance-chat--session seance-chat-test--permission-params
        (lambda (result &optional _err) (setq answer result)))
       (should (string-match-p "waiting for permission" (buffer-string)))
+      ;; the marker teaches the chat-side answer keys
+      (should (string-match-p "C-c C-c" (buffer-string)))
+      (should (string-match-p "C-c C-d" (buffer-string)))
       (with-current-buffer "*seance permission*"
         (seance-review-allow))
       (should answer)
       (should-not (string-match-p "waiting for permission" (buffer-string))))))
+
+(ert-deftest seance-chat-approve-answers-pending-permission ()
+  "`seance-chat-approve' allows the pending request from the chat buffer."
+  (require 'seance-review)
+  (seance-chat-test--with-buffer "echo"
+    (let ((answer nil))
+      (seance-review-handle-permission
+       seance-chat--session seance-chat-test--permission-params
+       (lambda (result &optional _err) (setq answer result)))
+      (seance-chat-approve)
+      (should (equal (plist-get (plist-get answer :outcome) :optionId)
+                     "opt-allow"))
+      (should-not (get-buffer "*seance permission*")))))
+
+(ert-deftest seance-chat-deny-answers-pending-permission ()
+  "`seance-chat-deny' rejects the pending request from the chat buffer."
+  (require 'seance-review)
+  (seance-chat-test--with-buffer "echo"
+    (let ((answer nil))
+      (seance-review-handle-permission
+       seance-chat--session seance-chat-test--permission-params
+       (lambda (result &optional _err) (setq answer result)))
+      (seance-chat-deny)
+      (should (equal (plist-get (plist-get answer :outcome) :optionId)
+                     "opt-reject"))
+      (should-not (get-buffer "*seance permission*")))))
+
+(ert-deftest seance-chat-approve-without-pending-errors ()
+  "`seance-chat-approve' signals a user-error when nothing is pending."
+  (seance-chat-test--with-buffer "echo"
+    (should-error (seance-chat-approve) :type 'user-error)))
+
+(ert-deftest seance-chat-initialize-with-auto-mode ()
+  "`seance-chat--initialize' with MODE sets the session's permission mode."
+  (let ((seance-codex-acp-command (seance-test-mock-command "echo"))
+        (seance-chat-buffer-name "*seance-test*"))
+    (with-current-buffer (get-buffer-create seance-chat-buffer-name)
+      (unwind-protect
+          (progn
+            (seance-chat-mode)
+            (seance-chat--initialize 'auto)
+            (should (eq (seance-acp-session-permission-mode
+                         seance-chat--session)
+                        'auto)))
+        (when seance-chat--session
+          (seance-acp-disconnect seance-chat--session))
+        (kill-buffer)))))
+
+(ert-deftest seance-yolo-prefix-flips-running-session-to-auto ()
+  "`seance' with a prefix argument switches a running session to auto."
+  (seance-chat-test--with-buffer "echo"
+    (should (eq (seance-acp-session-permission-mode seance-chat--session)
+                'gated))
+    (save-window-excursion (seance t))
+    (should (eq (seance-acp-session-permission-mode seance-chat--session)
+                'auto))))
 
 ;;; seance-chat-test.el ends here
