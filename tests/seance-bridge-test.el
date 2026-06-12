@@ -121,6 +121,41 @@ a path), so the spec stays correct under non-default socket dirs."
                          '(:name "SEANCE_SERVER"
                            :value "/tmp/stub-socket-dir/stub-server"))))))))
 
+(ert-deftest seance-bridge-mcp-servers-socket-collision ()
+  "Another process owns the default socket: switch to a dedicated name.
+The fix must rename to seance-<pid> BEFORE server-start, and the spec's
+SEANCE_SERVER env must point at the renamed socket, not the foreign one."
+  (let ((seance-enable-bridge t)
+        (noninteractive nil)
+        (server-name "server")
+        (server-socket-dir "/tmp/stub-socket-dir")
+        (started nil))
+    (cl-letf (((symbol-function 'seance-bridge--server-live-p) (lambda () nil))
+              ((symbol-function 'server-running-p) (lambda (&optional _name) t))
+              ((symbol-function 'server-start)
+               (lambda (&rest _) (setq started t))))
+      (let* ((servers (seance-bridge-mcp-servers))
+             (env (aref (plist-get (aref servers 0) :env) 0)))
+        (should started)
+        (should (string-suffix-p (format "seance-%d" (emacs-pid))
+                                 (plist-get env :value)))))))
+
+(ert-deftest seance-bridge-mcp-servers-no-collision-keeps-name ()
+  "Free (or stale) default socket: keep the configured name unchanged."
+  (let ((seance-enable-bridge t)
+        (noninteractive nil)
+        (server-name "server")
+        (server-socket-dir "/tmp/stub-socket-dir")
+        (started nil))
+    (cl-letf (((symbol-function 'seance-bridge--server-live-p) (lambda () nil))
+              ((symbol-function 'server-running-p) (lambda (&optional _name) nil))
+              ((symbol-function 'server-start)
+               (lambda (&rest _) (setq started t))))
+      (let* ((servers (seance-bridge-mcp-servers))
+             (env (aref (plist-get (aref servers 0) :env) 0)))
+        (should started)
+        (should (equal (plist-get env :value) "/tmp/stub-socket-dir/server"))))))
+
 ;;; End-to-end: the bin/seance-mcp-bridge.el script
 
 (require 'seance-rpc)  ; reuse the ndjson transport to talk MCP to the script

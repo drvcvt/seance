@@ -144,6 +144,19 @@ name -- so the bridge script finds the server even when
    ((and noninteractive (not (seance-bridge--server-live-p))) [])
    (t
     (unless (seance-bridge--server-live-p)
+      ;; Another process (e.g. an `emacs --fg-daemon') may already own
+      ;; the configured socket name; `server-start' would then just warn
+      ;; and leave this Emacs serverless, while SEANCE_SERVER below would
+      ;; route the bridge's emacsclient calls into that foreign process.
+      ;; Don't fight over the default socket: a dedicated name keeps the
+      ;; daemon's emacsclient workflow untouched and routes the bridge
+      ;; into THIS Emacs.  A stale dead socket is unaffected:
+      ;; `server-running-p' returns nil and `server-start' reclaims it.
+      ;; setq (not let) is deliberate so server.el's exit cleanup uses
+      ;; the matching name; mutating `server-name' is safe because this
+      ;; Emacs demonstrably had no server of its own.
+      (when (server-running-p server-name)
+        (setq server-name (format "seance-%d" (emacs-pid))))
       (server-start))
     (vector
      `(:name "seance-emacs"
