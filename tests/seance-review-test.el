@@ -123,20 +123,67 @@ request must reach the pending state and stay answerable."
     (should (eq (seance-acp-session-permission-mode sess) 'auto))))
 
 (ert-deftest seance-review-pending-and-answered-hooks-fire ()
-  "Gated show fires `seance-review-on-pending'; answering fires
-`seance-review-on-answered'."
-  (let* ((pending 0) (answered 0)
-         (seance-review-on-pending (lambda () (cl-incf pending)))
+  "Gated show fires `seance-review-on-pending' with the toolCall title;
+answering fires `seance-review-on-answered'."
+  (let* ((pending nil) (answered 0)
+         (seance-review-on-pending (lambda (title) (push title pending)))
          (seance-review-on-answered (lambda () (cl-incf answered))))
     (seance-review-handle-permission
      (seance-review-test--session 'gated) seance-review-test--params
      #'ignore)
-    (should (= pending 1))
+    (should (equal pending '("edit guarded.el")))
     (should (= answered 0))
     (with-current-buffer "*seance permission*"
       (seance-review-allow))
-    (should (= pending 1))
+    (should (equal pending '("edit guarded.el")))
     (should (= answered 1))))
+
+(ert-deftest seance-review-pending-hook-title-falls-back ()
+  "A toolCall without a title reports the generic \"tool call\"."
+  (let* ((pending nil)
+         (seance-review-on-pending (lambda (title) (push title pending)))
+         (params '(:sessionId "s1"
+                   :toolCall (:toolCallId "tc-p2" :kind "execute" :content [])
+                   :options [(:optionId "opt-allow" :name "Allow"
+                              :kind "allow_once")])))
+    (seance-review-handle-permission
+     (seance-review-test--session 'gated) params #'ignore)
+    (should (equal pending '("tool call")))
+    (with-current-buffer "*seance permission*"
+      (seance-review-allow))))
+
+(ert-deftest seance-review-popup-off-by-default ()
+  "With `seance-permission-popup' nil (the default) a gated request
+must not display the permission buffer; the buffer still exists and
+holds the parked request."
+  (should (null (default-value 'seance-permission-popup)))
+  (let ((displayed nil)
+        (answer nil))
+    (cl-letf (((symbol-function 'display-buffer)
+               (lambda (&rest args) (push args displayed) nil)))
+      (seance-review-handle-permission
+       (seance-review-test--session 'gated) seance-review-test--params
+       (lambda (result &optional _err) (setq answer result))))
+    (should (null displayed))
+    (should (get-buffer "*seance permission*"))
+    (with-current-buffer "*seance permission*"
+      (seance-review-allow))
+    (should (equal (plist-get (plist-get answer :outcome) :optionId)
+                   "opt-allow"))))
+
+(ert-deftest seance-review-popup-on-displays-side-window ()
+  "With `seance-permission-popup' non-nil the buffer is displayed."
+  (let ((seance-permission-popup t)
+        (displayed nil))
+    (cl-letf (((symbol-function 'display-buffer)
+               (lambda (buf &rest _) (push buf displayed) nil)))
+      (seance-review-handle-permission
+       (seance-review-test--session 'gated) seance-review-test--params
+       #'ignore))
+    (should (equal (mapcar #'buffer-name displayed)
+                   '("*seance permission*")))
+    (with-current-buffer "*seance permission*"
+      (seance-review-allow))))
 
 (ert-deftest seance-review-end-to-end-against-mock ()
   "Full loop: mock requests permission, we allow, mock reports the pick."

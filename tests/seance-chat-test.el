@@ -178,22 +178,75 @@ so the test exercises the erroring-mode path, not the unknown-lang one."
   "session/request_permission params for the chat marker test.")
 
 (ert-deftest seance-chat-permission-marker-appears-and-clears ()
-  "A gated permission request shows a waiting marker in the chat
-transcript; answering it removes the marker again."
+  "A gated permission request shows a marker naming the tool call in
+the chat transcript; answering it removes the marker again."
   (require 'seance-review)
   (seance-chat-test--with-buffer "echo"
     (let ((answer nil))
       (seance-review-handle-permission
        seance-chat--session seance-chat-test--permission-params
        (lambda (result &optional _err) (setq answer result)))
-      (should (string-match-p "waiting for permission" (buffer-string)))
-      ;; the marker teaches the chat-side answer keys
+      (should (string-match-p "Codex requests:" (buffer-string)))
+      ;; the marker names WHAT wants permission
+      (should (string-match-p "edit guarded\\.el" (buffer-string)))
+      ;; the marker teaches the chat-side answer + diff keys
       (should (string-match-p "C-c C-c" (buffer-string)))
       (should (string-match-p "C-c C-d" (buffer-string)))
+      (should (string-match-p "C-c C-v" (buffer-string)))
       (with-current-buffer "*seance permission*"
         (seance-review-allow))
       (should answer)
-      (should-not (string-match-p "waiting for permission" (buffer-string))))))
+      (should-not (string-match-p "Codex requests:" (buffer-string))))))
+
+(ert-deftest seance-chat-show-permission-displays-pending-buffer ()
+  "`seance-chat-show-permission' displays the permission buffer on demand."
+  (require 'seance-review)
+  (seance-chat-test--with-buffer "echo"
+    (seance-review-handle-permission
+     seance-chat--session seance-chat-test--permission-params #'ignore)
+    (let ((displayed nil))
+      (cl-letf (((symbol-function 'display-buffer)
+                 (lambda (buf &rest _) (push buf displayed) nil)))
+        (seance-chat-show-permission))
+      (should (equal (mapcar #'buffer-name displayed)
+                     '("*seance permission*"))))
+    (seance-chat-approve)))
+
+(ert-deftest seance-chat-show-permission-without-pending-errors ()
+  "`seance-chat-show-permission' signals a user-error without a request."
+  (seance-chat-test--with-buffer "echo"
+    (should-error (seance-chat-show-permission) :type 'user-error)))
+
+(ert-deftest seance-chat-toggle-to-auto-answers-pending ()
+  "Flipping the session to auto allows a still-pending request, so the
+turn never stays stuck behind the parked prompt."
+  (require 'seance-review)
+  (seance-chat-test--with-buffer "echo"
+    (let ((answer nil))
+      (seance-review-handle-permission
+       seance-chat--session seance-chat-test--permission-params
+       (lambda (result &optional _err) (setq answer result)))
+      (should (null answer))
+      (seance-toggle-permission-mode)
+      (should (eq (seance-acp-session-permission-mode seance-chat--session)
+                  'auto))
+      (should (equal (plist-get (plist-get answer :outcome) :optionId)
+                     "opt-allow"))
+      (should-not (get-buffer "*seance permission*")))))
+
+(ert-deftest seance-chat-toggle-to-gated-leaves-pending-alone ()
+  "Flipping auto -> gated must not answer a pending request."
+  (require 'seance-review)
+  (seance-chat-test--with-buffer "echo"
+    (seance-toggle-permission-mode)        ; gated -> auto
+    (let ((answer nil))
+      (seance-review--show-permission      ; park a request directly
+       seance-chat--session seance-chat-test--permission-params
+       (lambda (result &optional _err) (setq answer result)))
+      (seance-toggle-permission-mode)      ; auto -> gated
+      (should (null answer))
+      (should (get-buffer "*seance permission*"))
+      (seance-chat-approve))))
 
 (ert-deftest seance-chat-approve-answers-pending-permission ()
   "`seance-chat-approve' allows the pending request from the chat buffer."

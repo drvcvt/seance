@@ -88,6 +88,7 @@ Chat buffer keys:
 | `C-c C-k` | Cancel the in-flight turn |
 | `C-c C-c` | Allow the pending tool call (without leaving the chat) |
 | `C-c C-d` | Deny the pending tool call |
+| `C-c C-v` | Show the pending permission diff in a side window |
 | `C-c C-p` | Toggle gated/auto permission mode |
 | `C-c C-r` | Open the session review buffer |
 | `C-c C-q` | Stop the session |
@@ -99,13 +100,18 @@ is generated from the same tables that build the keymaps, so it cannot drift.
 
 Permission modes:
 
-- `gated` (default): every agent tool call that needs permission opens a
-  diff side window. Answer straight from the chat buffer with `C-c C-c`
-  (allow) / `C-c C-d` (deny), or in the diff window with `a` to allow
-  once, `d` to deny, `A` to allow everything for the rest of the session
-  (switches the session to auto).
+- `gated` (default): every agent tool call that needs permission shows a
+  marker line in the chat naming the tool call. Answer straight from the
+  chat buffer with `C-c C-c` (allow) / `C-c C-d` (deny), or press
+  `C-c C-v` to see the diff in a side window first — there `a` allows
+  once, `d` denies, `A` allows everything for the rest of the session
+  (switches the session to auto). The side window only pops up by itself
+  when `seance-permission-popup` is non-nil.
 - `auto`: tool calls are allowed silently; edits are still recorded for
   review.
+
+Toggling to auto (`C-c C-p`) also allows a still-pending request, so a
+turn stuck on a permission prompt resumes immediately.
 
 Review buffer (`C-c C-r` / `M-x seance-review`): everything the session
 changed, coalesced per file into one unified diff (first original against
@@ -146,6 +152,8 @@ language renders as plain text, never as a derived function name.
   (default `("npx" "@zed-industries/codex-acp")`)
 - `seance-permission-mode` — default permission mode for new sessions,
   `gated` or `auto`
+- `seance-permission-popup` — if non-nil, display the permission diff
+  window automatically on each gated request (default nil)
 - `seance-enable-bridge` — whether to expose the emacs_* tools at all
 - `seance-cwd-function` — function returning the working directory for new
   sessions (default: current project root, else `default-directory`)

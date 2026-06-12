@@ -1,9 +1,10 @@
 ;;; seance-review.el --- permission gating and session review -*- lexical-binding: t; -*-
 
 ;;; Commentary:
-;; Gated mode: every session/request_permission opens a diff side window
-;; (a=allow, d=deny, A=allow rest of session).  Auto mode: allow silently.
-;; The session review buffer itself arrives in a later task.
+;; Gated mode: every session/request_permission parks in the permission
+;; buffer (a=allow, d=deny, A=allow rest of session); the diff side
+;; window pops up only when `seance-permission-popup' is non-nil.
+;; Auto mode: allow silently.
 
 ;;; Code:
 
@@ -16,7 +17,8 @@
   "Name of the buffer showing pending permission requests.")
 
 (defvar seance-review-on-pending nil
-  "When non-nil, called with no args after a gated request is displayed.
+  "When non-nil, called with the toolCall title after a gated request parks.
+The title is a string (\"tool call\" when the request has none).
 Consumers (e.g. the chat buffer) use it to show a waiting indicator.")
 (defvar seance-review-on-answered nil
   "When non-nil, called with no args after a pending request is answered.
@@ -47,7 +49,7 @@ Falls back to the first option when no kind matches."
   "ACP session/request_permission entry point.
 SESS is the session, PARAMS the request params, REPLY the async
 result continuation.  Auto mode allows immediately; gated mode
-shows the diff side window and waits for the user."
+parks the request in the permission buffer and waits for the user."
   (if (eq (seance-acp-session-permission-mode sess) 'auto)
       (funcall reply (seance-review--outcome
                       (seance-review--pick-option
@@ -82,9 +84,12 @@ shows the diff side window and waits for the user."
 (declare-function seance-permission-help "seance-review")
 
 (defun seance-review--show-permission (sess params reply)
-  "Display PARAMS' tool call in the permission buffer; REPLY answers later.
+  "Park PARAMS' tool call in the permission buffer; REPLY answers later.
 SESS is stored buffer-locally so `seance-review-allow-all' can flip
-its permission mode."
+its permission mode.  The buffer is always built (it holds the parked
+reply and the rendered diff) but displayed only when
+`seance-permission-popup' is non-nil; `seance-chat-show-permission'
+brings it up on demand."
   (let ((buf (get-buffer-create seance-review-permission-buffer)))
     (with-current-buffer buf
       ;; An unanswered earlier request would be orphaned by the rebuild
@@ -112,12 +117,15 @@ its permission mode."
         (setq seance-review--reply reply
               seance-review--options (plist-get params :options)
               seance-review--session sess)))
-    (display-buffer buf '(display-buffer-in-side-window (side . right)))
+    (when seance-permission-popup
+      (display-buffer buf '(display-buffer-in-side-window (side . right))))
     ;; A stale request replaced above stays "pending" from the consumer's
-    ;; view: the hook fires once per displayed request, and the pending
+    ;; view: the hook fires once per parked request, and the pending
     ;; handler must cope with being called while already pending.
     (when seance-review-on-pending
-      (funcall seance-review-on-pending))))
+      (funcall seance-review-on-pending
+               (or (plist-get (plist-get params :toolCall) :title)
+                   "tool call")))))
 
 (defun seance-review--answer (&rest kinds)
   "Answer the pending permission request with the first option matching KINDS.

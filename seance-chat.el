@@ -461,8 +461,8 @@ any error during fontification degrade to the plain unfontified text."
          (buffer-local-value 'seance-chat--output-marker buf)
          buf)))
 
-(defun seance-chat--permission-pending ()
-  "Show a waiting-for-permission line in the chat transcript.
+(defun seance-chat--permission-pending (title)
+  "Show a waiting-for-permission line for the tool call TITLE.
 Replaces any marker still present from an overlapping earlier request."
   (when-let* ((buf (seance-chat--live-chat-buffer)))
     (with-current-buffer buf
@@ -470,8 +470,8 @@ Replaces any marker still present from an overlapping earlier request."
       (let ((start (copy-marker seance-chat--output-marker nil)))
         (seance-chat--insert-output
          (propertize
-          (concat "⏸ waiting for permission — C-c C-c allow · C-c C-d deny"
-                  " (or a/d/A in the diff window)\n")
+          (format "⏸ Codex requests: %s — C-c C-c allow · C-c C-d deny · C-c C-v diff\n"
+                  title)
           'face 'seance-thought-face))
         (setq seance-chat--permission-region
               (cons start (copy-marker seance-chat--output-marker nil)))))))
@@ -520,6 +520,14 @@ was never loaded there cannot be one."
   (with-current-buffer (seance-chat--permission-buffer)
     (seance-review-deny)))
 
+(defun seance-chat-show-permission ()
+  "Display the pending permission diff in the right side window.
+The window no longer pops up automatically (unless
+`seance-permission-popup' is set); this brings it up on demand."
+  (interactive)
+  (display-buffer (seance-chat--permission-buffer)
+                  '(display-buffer-in-side-window (side . right))))
+
 ;; --- bindings: one table drives the keymap AND the ? help ----------------
 
 (require 'seance-keys)
@@ -535,7 +543,8 @@ was never loaded there cannot be one."
      ("C-c C-k" seance-chat-cancel "Cancel current turn"))
     (permission
      ("C-c C-c" seance-chat-approve "Allow pending tool call")
-     ("C-c C-d" seance-chat-deny "Deny pending tool call"))
+     ("C-c C-d" seance-chat-deny "Deny pending tool call")
+     ("C-c C-v" seance-chat-show-permission "Show pending permission diff"))
     (session
      ("C-c C-p" seance-toggle-permission-mode "Toggle gated/auto")
      ("C-c C-r" seance-review "Open session review")

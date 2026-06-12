@@ -29,6 +29,13 @@
 collects edits for later review."
   :type '(choice (const gated) (const auto)))
 
+(defcustom seance-permission-popup nil
+  "If non-nil, display the permission diff window on each gated request.
+The permission buffer is always created and filled; this only controls
+whether it pops up automatically.  When nil, answer from the chat buffer
+and open the diff on demand with `seance-chat-show-permission'."
+  :type 'boolean)
+
 (defcustom seance-enable-bridge t
   "If non-nil, expose the emacs_* MCP tools (live-eval bridge) to the agent."
   :type 'boolean)
@@ -54,6 +61,12 @@ collects edits for later review."
 (declare-function seance-acp-session-rpc "seance-acp" (cl-x))
 (declare-function seance-acp-session-permission-mode "seance-acp" (cl-x))
 (declare-function seance-rpc-alive-p "seance-rpc" (conn))
+;; Used by `seance-toggle-permission-mode' to answer a pending request
+;; on the flip to auto.  The permission buffer exists exactly while a
+;; request is pending, and only after seance-review was loaded; the
+;; boundp guard keeps the no-pending path free of that feature.
+(declare-function seance-review-allow "seance-review" ())
+(defvar seance-review-permission-buffer)
 (defvar seance-chat-buffer-name)
 (defvar seance-chat--session)
 (defvar seance-acp--session)
@@ -93,14 +106,21 @@ auto permission mode; an already running session is switched to auto."
           (setq seance-acp--session nil))))))
 
 (defun seance-toggle-permission-mode ()
-  "Toggle the chat buffer's session between gated and auto permission mode."
+  "Toggle the chat buffer's session between gated and auto permission mode.
+Flipping to auto also allows a still-pending permission request, so the
+session never stays stuck on a parked prompt."
   (interactive)
   (require 'seance-chat)
   (if-let* ((buf (get-buffer seance-chat-buffer-name))
             (sess (buffer-local-value 'seance-chat--session buf)))
-      (progn
-        (message "seance: permission mode is now %s"
-                 (seance-acp-toggle-permission-mode sess))
+      (let ((mode (seance-acp-toggle-permission-mode sess)))
+        (if-let* ((pbuf (and (eq mode 'auto)
+                             (boundp 'seance-review-permission-buffer)
+                             (get-buffer seance-review-permission-buffer))))
+            (progn
+              (with-current-buffer pbuf (seance-review-allow))
+              (message "seance: auto mode — pending request allowed"))
+          (message "seance: permission mode is now %s" mode))
         (force-mode-line-update t))
     (user-error "No active seance session")))
 
